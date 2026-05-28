@@ -1,0 +1,40 @@
+export type CardType = "Digimon" | "Tamer" | "Option" | "Digi-Egg" | string;
+
+export type DigimonCard = {
+  id: string;
+  name: string;
+  cardNumber: string;
+  setCode: string;
+  setName: string;
+  color: string[];
+  type: CardType;
+  rarity: string;
+  level?: number;
+  playCost?: number;
+  digivolveCost?: number;
+  dp?: number;
+  imageUrl: string;
+  effect?: string;
+  form?: string;
+};
+
+export type UserProfile = {
+  email: string;
+  displayName: string;
+};
+
+export type CollectionMap = Record<string, number>;
+
+export type DeckCard = {
+  cardId: string;
+  quantityRequired: number;
+};
+
+export type Deck = {
+  id: string;
+  name: string;
+  description?: string;
+  createdAt: string;
+  updatedAt: string;
+  cards: DeckCard[];
+};
