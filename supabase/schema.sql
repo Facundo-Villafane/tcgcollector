@@ -124,3 +124,19 @@ create policy "Users can unlike as themselves"
 on public.deck_likes
 for delete
 using (auth.uid() = user_id);
+
+create or replace function public.increment_deck_view(deck_id_arg uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  update public.decks
+  set view_count = view_count + 1
+  where id = deck_id_arg
+    and is_public = true;
+end;
+$$;
+
+grant execute on function public.increment_deck_view(uuid) to anon, authenticated;

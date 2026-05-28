@@ -14,6 +14,7 @@ import {
   Minus,
   Plus,
   Search,
+  Share2,
   ShieldCheck,
   Trash2,
   User as UserIcon,
@@ -474,7 +475,7 @@ export default function Home() {
     }
   }
 
-  function updateDeckDetails(deckId: string, details: Partial<Pick<Deck, "description" | "coverCardNumber">>) {
+  function updateDeckDetails(deckId: string, details: Partial<Pick<Deck, "description" | "coverCardNumber" | "isPublic">>) {
     setDecks((current) =>
       current.map((deck) =>
         deck.id === deckId ? { ...deck, ...details, updatedAt: new Date().toISOString() } : deck,
@@ -651,6 +652,7 @@ export default function Home() {
                     coverCard={getDeckCoverCard(activeDeck, activeDeckCards.all, cardsByNumber)}
                     stats={getDeckStats(activeDeck, ownedByCardNumber, cardsByNumber)}
                     onDescriptionChange={(description) => updateDeckDetails(activeDeck.id, { description })}
+                    onPublicChange={(isPublic) => updateDeckDetails(activeDeck.id, { isPublic })}
                     onDelete={() => deleteDeck(activeDeck.id)}
                   />
                   <DeckImportPanel onImport={(text) => importDeckList(activeDeck.id, text)} disabled={cards.length === 0} />
@@ -952,14 +954,18 @@ function DeckEditorHeader({
   coverCard,
   stats,
   onDescriptionChange,
+  onPublicChange,
   onDelete,
 }: {
   deck: Deck;
   coverCard?: DigimonCard;
   stats: ReturnType<typeof getDeckStats>;
   onDescriptionChange: (description: string) => void;
+  onPublicChange: (isPublic: boolean) => void;
   onDelete: () => void;
 }) {
+  const publicUrl = typeof window !== "undefined" ? `${window.location.origin}/decks/${deck.id}` : "";
+
   return (
     <div className="overflow-hidden rounded-md border border-[#d9ded6] bg-white shadow-sm">
       <div
@@ -975,11 +981,28 @@ function DeckEditorHeader({
       <div className="flex items-start justify-between gap-3">
         <div>
           <h1 className="text-3xl font-bold">{deck.name}</h1>
-          <p className="mt-2 text-sm text-white/80">
-            Main deck: {stats.totalCards} / 50 · Digi-Egg: {stats.eggCards} / 5
-          </p>
-          {coverCard && <p className="mt-2 text-sm font-semibold text-[#f4c430]">Portada: {coverCard.name}</p>}
-        </div>
+            <p className="mt-2 text-sm text-white/80">
+              Main deck: {stats.totalCards} / 50 · Digi-Egg: {stats.eggCards} / 5
+            </p>
+            {coverCard && <p className="mt-2 text-sm font-semibold text-[#f4c430]">Portada: {coverCard.name}</p>}
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button
+                className={`rounded-md px-3 py-2 text-sm font-semibold ${deck.isPublic ? "bg-[#e3f6df] text-[#187a45]" : "bg-white/15 text-white"}`}
+                onClick={() => onPublicChange(!(deck.isPublic ?? false))}
+              >
+                {deck.isPublic ? "Publicado" : "Privado"}
+              </button>
+              {deck.isPublic && (
+                <button
+                  className="flex items-center gap-2 rounded-md bg-white/15 px-3 py-2 text-sm font-semibold text-white"
+                  onClick={() => navigator.clipboard.writeText(publicUrl)}
+                >
+                  <Share2 size={15} />
+                  Copiar link
+                </button>
+              )}
+            </div>
+          </div>
         <button className="grid h-10 w-10 place-items-center rounded-md border border-white/25 bg-black/20 text-white" title="Eliminar deck" onClick={onDelete}>
           <Trash2 size={18} />
         </button>
