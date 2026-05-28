@@ -680,32 +680,45 @@ export default function Home() {
                             {showDeckImages ? "Vista compacta" : "Ver mini cartas"}
                           </button>
                         </div>
-                        <DeckSection
-                          title={`Main Deck (${activeDeckCards.mainCount})`}
-                          items={activeDeckCards.main}
-                          ownedByCardNumber={ownedByCardNumber}
-                          showImages={showDeckImages}
-                          onChange={(cardNumber, quantity) => setDeckQuantity(activeDeck.id, cardNumber, quantity)}
-                          onOpen={(card) => {
-                            setSelectedCardOwnedOverride(ownedByCardNumber[normalizeCardNumber(card.cardNumber)] ?? 0);
-                            setSelectedCard(card);
-                          }}
-                          coverCardNumber={activeDeck.coverCardNumber}
-                          onSetCover={(cardNumber) => updateDeckDetails(activeDeck.id, { coverCardNumber: cardNumber })}
-                        />
-                        <DeckSection
-                          title={`Digi-Egg Deck (${activeDeckCards.eggCount})`}
-                          items={activeDeckCards.eggs}
-                          ownedByCardNumber={ownedByCardNumber}
-                          showImages={showDeckImages}
-                          onChange={(cardNumber, quantity) => setDeckQuantity(activeDeck.id, cardNumber, quantity)}
-                          onOpen={(card) => {
-                            setSelectedCardOwnedOverride(ownedByCardNumber[normalizeCardNumber(card.cardNumber)] ?? 0);
-                            setSelectedCard(card);
-                          }}
-                          coverCardNumber={activeDeck.coverCardNumber}
-                          onSetCover={(cardNumber) => updateDeckDetails(activeDeck.id, { coverCardNumber: cardNumber })}
-                        />
+                        {showDeckImages ? (
+                          <>
+                            <DeckSection
+                              title={`Main Deck (${activeDeckCards.mainCount})`}
+                              items={activeDeckCards.main}
+                              ownedByCardNumber={ownedByCardNumber}
+                              onChange={(cardNumber, quantity) => setDeckQuantity(activeDeck.id, cardNumber, quantity)}
+                              onOpen={(card) => {
+                                setSelectedCardOwnedOverride(ownedByCardNumber[normalizeCardNumber(card.cardNumber)] ?? 0);
+                                setSelectedCard(card);
+                              }}
+                              coverCardNumber={activeDeck.coverCardNumber}
+                              onSetCover={(cardNumber) => updateDeckDetails(activeDeck.id, { coverCardNumber: cardNumber })}
+                            />
+                            <DeckSection
+                              title={`Digi-Egg Deck (${activeDeckCards.eggCount})`}
+                              items={activeDeckCards.eggs}
+                              ownedByCardNumber={ownedByCardNumber}
+                              onChange={(cardNumber, quantity) => setDeckQuantity(activeDeck.id, cardNumber, quantity)}
+                              onOpen={(card) => {
+                                setSelectedCardOwnedOverride(ownedByCardNumber[normalizeCardNumber(card.cardNumber)] ?? 0);
+                                setSelectedCard(card);
+                              }}
+                              coverCardNumber={activeDeck.coverCardNumber}
+                              onSetCover={(cardNumber) => updateDeckDetails(activeDeck.id, { coverCardNumber: cardNumber })}
+                            />
+                          </>
+                        ) : (
+                          <CompactDeckList
+                            groups={activeDeckCards.groups}
+                            ownedByCardNumber={ownedByCardNumber}
+                            coverCardNumber={activeDeck.coverCardNumber}
+                            onOpen={(card) => {
+                              setSelectedCardOwnedOverride(ownedByCardNumber[normalizeCardNumber(card.cardNumber)] ?? 0);
+                              setSelectedCard(card);
+                            }}
+                            onSetCover={(cardNumber) => updateDeckDetails(activeDeck.id, { coverCardNumber: cardNumber })}
+                          />
+                        )}
                       </div>
                     )}
 
@@ -1054,7 +1067,6 @@ function DeckSection({
   title,
   items,
   ownedByCardNumber,
-  showImages,
   onChange,
   onOpen,
   coverCardNumber,
@@ -1063,7 +1075,6 @@ function DeckSection({
   title: string;
   items: Array<{ cardNumber: string; card: DigimonCard; quantityRequired: number }>;
   ownedByCardNumber: CollectionMap;
-  showImages: boolean;
   onChange: (cardNumber: string, quantity: number) => void;
   onOpen: (card: DigimonCard) => void;
   coverCardNumber?: string;
@@ -1081,7 +1092,6 @@ function DeckSection({
             card={item.card}
             required={item.quantityRequired}
             owned={ownedByCardNumber[normalizeCardNumber(item.cardNumber)] ?? 0}
-            showImage={showImages}
             onOpen={() => onOpen(item.card)}
             onChange={(quantity) => onChange(item.cardNumber, quantity)}
             isCover={normalizeCardNumber(coverCardNumber ?? "") === normalizeCardNumber(item.cardNumber)}
@@ -1097,7 +1107,6 @@ function DeckCardRow({
   card,
   required,
   owned,
-  showImage,
   onOpen,
   onChange,
   isCover,
@@ -1106,7 +1115,6 @@ function DeckCardRow({
   card: DigimonCard;
   required: number;
   owned: number;
-  showImage: boolean;
   onOpen: () => void;
   onChange: (quantity: number) => void;
   isCover: boolean;
@@ -1116,14 +1124,12 @@ function DeckCardRow({
 
   return (
     <article
-      className={`grid gap-3 rounded-md border p-3 shadow-sm ${showImage ? "grid-cols-[72px_1fr] sm:grid-cols-[82px_1fr_auto]" : "sm:grid-cols-[1fr_auto]"} sm:items-center ${isCover ? "border-[#f4c430]" : "border-[#d9ded6]"}`}
+      className={`grid grid-cols-[72px_1fr] gap-3 rounded-md border p-3 shadow-sm sm:grid-cols-[82px_1fr_auto] sm:items-center ${isCover ? "border-[#f4c430]" : "border-[#d9ded6]"}`}
       style={{ background: getCardRowBackground(card.color) }}
     >
-      {showImage && (
-        <button className="overflow-hidden rounded-md bg-[#eef0e9]" onClick={onOpen} title="Ver carta">
-          <img className="aspect-[5/7] h-full w-full object-cover" src={card.imageUrl} alt={card.name} loading="lazy" />
-        </button>
-      )}
+      <button className="overflow-hidden rounded-md bg-[#eef0e9]" onClick={onOpen} title="Ver carta">
+        <img className="aspect-[5/7] h-full w-full object-cover" src={card.imageUrl} alt={card.name} loading="lazy" />
+      </button>
       <div className="min-w-0">
         <button className="max-w-full truncate text-left font-semibold" onClick={onOpen}>
           {card.name}
@@ -1147,6 +1153,78 @@ function DeckCardRow({
         <QuantityStepper value={required} onChange={onChange} label="Deck" />
       </div>
     </article>
+  );
+}
+
+function CompactDeckList({
+  groups,
+  ownedByCardNumber,
+  coverCardNumber,
+  onOpen,
+  onSetCover,
+}: {
+  groups: Array<{ title: string; items: Array<{ cardNumber: string; card: DigimonCard; quantityRequired: number }> }>;
+  ownedByCardNumber: CollectionMap;
+  coverCardNumber?: string;
+  onOpen: (card: DigimonCard) => void;
+  onSetCover: (cardNumber: string) => void;
+}) {
+  return (
+    <div className="grid gap-5 lg:grid-cols-3">
+      {groups.map((group) => (
+        <div key={group.title} className="space-y-2">
+          <h3 className="border-b border-[#c9d2cd] pb-2 font-bold">
+            {group.title} ({group.items.reduce((sum, item) => sum + item.quantityRequired, 0)})
+          </h3>
+          <div className="space-y-1">
+            {group.items.map((item) => (
+              <CompactDeckRow
+                key={item.cardNumber}
+                item={item}
+                owned={ownedByCardNumber[normalizeCardNumber(item.cardNumber)] ?? 0}
+                isCover={normalizeCardNumber(coverCardNumber ?? "") === normalizeCardNumber(item.cardNumber)}
+                onOpen={() => onOpen(item.card)}
+                onSetCover={() => onSetCover(item.cardNumber)}
+              />
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function CompactDeckRow({
+  item,
+  owned,
+  isCover,
+  onOpen,
+  onSetCover,
+}: {
+  item: { cardNumber: string; card: DigimonCard; quantityRequired: number };
+  owned: number;
+  isCover: boolean;
+  onOpen: () => void;
+  onSetCover: () => void;
+}) {
+  const missing = Math.max(item.quantityRequired - owned, 0);
+
+  return (
+    <div className="grid grid-cols-[24px_minmax(0,1fr)_auto_auto] items-center gap-2 rounded px-1 py-1 text-sm hover:bg-white/70">
+      <span className="font-semibold text-[#1d5fa8]">{item.quantityRequired}</span>
+      <button className="truncate text-left font-semibold" onClick={onOpen}>
+        {item.card.name}
+        <span className="ml-1 text-[10px] font-normal text-[#60706d]">{item.card.cardNumber}</span>
+      </button>
+      <span className={`h-2.5 w-2.5 rounded-full ${missing === 0 ? "bg-[#187a45]" : "bg-[#d9534f]"}`} title={missing === 0 ? "Completa" : `Falta ${missing}`} />
+      <button
+        className={`grid h-7 w-7 place-items-center rounded ${isCover ? "bg-[#f4c430] text-[#1b2424]" : "text-[#60706d] hover:bg-white"}`}
+        title={isCover ? "Portada actual" : "Usar como portada"}
+        onClick={onSetCover}
+      >
+        <Crown size={14} />
+      </button>
+    </div>
   );
 }
 
@@ -1432,6 +1510,9 @@ function getOwnedByCardNumber(collection: CollectionMap, cardsById: Map<string, 
 function splitDeckCards(deck: Deck | undefined, cardsByNumber: Map<string, DigimonCard>) {
   const main: Array<{ cardNumber: string; card: DigimonCard; quantityRequired: number }> = [];
   const eggs: Array<{ cardNumber: string; card: DigimonCard; quantityRequired: number }> = [];
+  const digimon: Array<{ cardNumber: string; card: DigimonCard; quantityRequired: number }> = [];
+  const options: Array<{ cardNumber: string; card: DigimonCard; quantityRequired: number }> = [];
+  const tamers: Array<{ cardNumber: string; card: DigimonCard; quantityRequired: number }> = [];
 
   for (const deckCard of deck?.cards ?? []) {
     const cardNumber = deckCard.cardNumber ?? deckCard.cardId;
@@ -1443,13 +1524,28 @@ function splitDeckCards(deck: Deck | undefined, cardsByNumber: Map<string, Digim
       eggs.push(item);
     } else {
       main.push(item);
+      if (card.type === "Option") {
+        options.push(item);
+      } else if (card.type === "Tamer") {
+        tamers.push(item);
+      } else {
+        digimon.push(item);
+      }
     }
   }
+
+  const groups = [
+    { title: "Digimon", items: digimon },
+    { title: "Option", items: options },
+    { title: "Tamer", items: tamers },
+    { title: "Egg Deck", items: eggs },
+  ].filter((group) => group.items.length > 0);
 
   return {
     main,
     eggs,
     all: [...main, ...eggs],
+    groups,
     mainCount: main.reduce((sum, item) => sum + item.quantityRequired, 0),
     eggCount: eggs.reduce((sum, item) => sum + item.quantityRequired, 0),
   };
