@@ -1,0 +1,126 @@
+create table if not exists public.user_collection (
+  user_id uuid not null references auth.users(id) on delete cascade,
+  card_id text not null,
+  quantity integer not null check (quantity >= 0),
+  updated_at timestamptz not null default now(),
+  primary key (user_id, card_id)
+);
+
+create table if not exists public.decks (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  name text not null,
+  description text,
+  cover_card_number text,
+  is_public boolean not null default false,
+  view_count integer not null default 0,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.deck_cards (
+  deck_id uuid not null references public.decks(id) on delete cascade,
+  card_number text not null,
+  quantity_required integer not null check (quantity_required between 1 and 4),
+  primary key (deck_id, card_number)
+);
+
+create table if not exists public.deck_likes (
+  deck_id uuid not null references public.decks(id) on delete cascade,
+  user_id uuid not null references auth.users(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  primary key (deck_id, user_id)
+);
+
+alter table public.user_collection enable row level security;
+alter table public.decks enable row level security;
+alter table public.deck_cards enable row level security;
+alter table public.deck_likes enable row level security;
+
+drop policy if exists "Users can manage their collection" on public.user_collection;
+create policy "Users can manage their collection"
+on public.user_collection
+for all
+using (auth.uid() = user_id)
+with check (auth.uid() = user_id);
+
+drop policy if exists "Users can read own or public decks" on public.decks;
+create policy "Users can read own or public decks"
+on public.decks
+for select
+using (is_public = true or auth.uid() = user_id);
+
+drop policy if exists "Users can create own decks" on public.decks;
+create policy "Users can create own decks"
+on public.decks
+for insert
+with check (auth.uid() = user_id);
+
+drop policy if exists "Users can update own decks" on public.decks;
+create policy "Users can update own decks"
+on public.decks
+for update
+using (auth.uid() = user_id)
+with check (auth.uid() = user_id);
+
+drop policy if exists "Users can delete own decks" on public.decks;
+create policy "Users can delete own decks"
+on public.decks
+for delete
+using (auth.uid() = user_id);
+
+drop policy if exists "Users can read cards in visible decks" on public.deck_cards;
+create policy "Users can read cards in visible decks"
+on public.deck_cards
+for select
+using (
+  exists (
+    select 1 from public.decks
+    where decks.id = deck_cards.deck_id
+      and (decks.is_public = true or decks.user_id = auth.uid())
+  )
+);
+
+drop policy if exists "Users can manage cards in own decks" on public.deck_cards;
+create policy "Users can manage cards in own decks"
+on public.deck_cards
+for all
+using (
+  exists (
+    select 1 from public.decks
+    where decks.id = deck_cards.deck_id
+      and decks.user_id = auth.uid()
+  )
+)
+with check (
+  exists (
+    select 1 from public.decks
+    where decks.id = deck_cards.deck_id
+      and decks.user_id = auth.uid()
+  )
+);
+
+drop policy if exists "Anyone can read likes" on public.deck_likes;
+create policy "Anyone can read likes"
+on public.deck_likes
+for select
+using (true);
+
+drop policy if exists "Users can like public decks" on public.deck_likes;
+create policy "Users can like public decks"
+on public.deck_likes
+for insert
+with check (
+  auth.uid() = user_id
+  and exists (
+    select 1 from public.decks
+    where decks.id = deck_likes.deck_id
+      and decks.is_public = true
+  )
+);
+
+drop policy if exists "Users can unlike as themselves" on public.deck_likes;
+create policy "Users can unlike as themselves"
+on public.deck_likes
+for delete
+using (auth.uid() = user_id);

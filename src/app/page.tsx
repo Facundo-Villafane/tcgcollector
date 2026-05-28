@@ -40,6 +40,22 @@ type DeckImportResult = {
   ignored: string[];
 };
 
+type DeckRow = {
+  id: string;
+  user_id: string;
+  name: string;
+  description: string | null;
+  cover_card_number: string | null;
+  is_public: boolean;
+  view_count: number;
+  created_at: string;
+  updated_at: string;
+  deck_cards?: Array<{
+    card_number: string;
+    quantity_required: number;
+  }>;
+};
+
 export default function Home() {
   const supabase = useMemo(() => createClient(), []);
   const [cards, setCards] = useState<DigimonCard[]>([]);
@@ -47,6 +63,8 @@ export default function Home() {
   const [isAuthLoading, setIsAuthLoading] = useState(true);
   const [authError, setAuthError] = useState("");
   const [error, setError] = useState("");
+  const [saveStatus, setSaveStatus] = useState("Guardado local");
+  const [hasLoadedRemoteData, setHasLoadedRemoteData] = useState(false);
   const [user, setUser] = useState<UserProfile | null>(null);
   const [view, setView] = useState<View>("dashboard");
   const [query, setQuery] = useState("");
@@ -77,6 +95,7 @@ export default function Home() {
     supabase.auth.getUser().then(({ data }) => {
       if (!isMounted) return;
       setUser(data.user ? toUserProfile(data.user) : null);
+      setHasLoadedRemoteData(false);
       setIsAuthLoading(false);
     });
 
@@ -84,6 +103,7 @@ export default function Home() {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
       setUser(session?.user ? toUserProfile(session.user) : null);
+      setHasLoadedRemoteData(false);
       setIsAuthLoading(false);
     });
 
@@ -180,7 +200,173 @@ export default function Home() {
   async function handleLogout() {
     await supabase.auth.signOut();
     setUser(null);
+    setHasLoadedRemoteData(false);
   }
+
+  async function loadRemoteUserData(userId: string) {
+    setSaveStatus("Cargando Supabase...");
+
+    const [{ data: collectionRows, error: collectionError }, { data: deckRows, error: deckError }] = await Promise.all([
+      supabase.from("user_collection").select("card_id, quantity").eq("user_id", userId),
+      supabase
+        .from("decks")
+        .select("id,user_id,name,description,cover_card_number,is_public,view_count,created_at,updated_at,deck_cards(card_number,quantity_required)")
+        .eq("user_id", userId)
+        .order("updated_at", { ascending: false }),
+    ]);
+
+    if (collectionError || deckError) {
+      setSaveStatus("Guardado local: falta configurar Supabase");
+      setHasLoadedRemoteData(false);
+      return;
+    }
+
+    const remoteCollection = Object.fromEntries(
+      (collectionRows ?? []).map((row) => [String(row.card_id), Number(row.quantity)]),
+    );
+    const remoteDecks = ((deckRows ?? []) as DeckRow[]).map(fromDeckRow);
+
+    if (Object.keys(remoteCollection).length === 0 && remoteDecks.length === 0 && (Object.keys(collection).length > 0 || decks.length > 0)) {
+      setHasLoadedRemoteData(true);
+      setSaveStatus("Migrando datos locales...");
+      await syncCollection(userId, collection);
+      await syncDecks(userId, decks);
+      return;
+    }
+
+    setCollection(remoteCollection);
+    setDecks(remoteDecks);
+    setActiveDeckId(remoteDecks[0]?.id ?? "");
+    setHasLoadedRemoteData(true);
+    setSaveStatus("Sincronizado");
+  }
+
+  async function syncCollection(userId: string, nextCollection: CollectionMap) {
+    setSaveStatus("Guardando colección...");
+
+    const entries = Object.entries(nextCollection).filter(([, quantity]) => quantity > 0);
+    const { error: deleteError } = await supabase.from("user_collection").delete().eq("user_id", userId);
+
+    if (deleteError) {
+      setSaveStatus("No se pudo guardar colección");
+      return;
+    }
+
+    if (entries.length > 0) {
+      const { error: insertError } = await supabase.from("user_collection").insert(
+        entries.map(([cardId, quantity]) => ({
+          user_id: userId,
+          card_id: cardId,
+          quantity,
+        })),
+      );
+
+      if (insertError) {
+        setSaveStatus("No se pudo guardar colección");
+        return;
+      }
+    }
+
+    setSaveStatus("Sincronizado");
+  }
+
+  async function syncDecks(userId: string, nextDecks: Deck[]) {
+    setSaveStatus("Guardando decks...");
+
+    const deckIds = nextDecks.map((deck) => deck.id);
+    const { data: remoteDecks, error: remoteError } = await supabase.from("decks").select("id").eq("user_id", userId);
+
+    if (remoteError) {
+      setSaveStatus("No se pudieron guardar decks");
+      return;
+    }
+
+    const removedIds = (remoteDecks ?? []).map((deck) => deck.id).filter((id) => !deckIds.includes(id));
+    if (removedIds.length > 0) {
+      const { error: deleteError } = await supabase.from("decks").delete().in("id", removedIds);
+      if (deleteError) {
+        setSaveStatus("No se pudieron guardar decks");
+        return;
+      }
+    }
+
+    if (nextDecks.length === 0) {
+      setSaveStatus("Sincronizado");
+      return;
+    }
+
+    const { error: upsertError } = await supabase.from("decks").upsert(
+      nextDecks.map((deck) => ({
+        id: deck.id,
+        user_id: userId,
+        name: deck.name,
+        description: deck.description ?? null,
+        cover_card_number: deck.coverCardNumber ?? null,
+        is_public: deck.isPublic ?? false,
+        view_count: deck.viewCount ?? 0,
+        created_at: deck.createdAt,
+        updated_at: deck.updatedAt,
+      })),
+    );
+
+    if (upsertError) {
+      setSaveStatus("No se pudieron guardar decks");
+      return;
+    }
+
+    for (const deck of nextDecks) {
+      const { error: deleteCardsError } = await supabase.from("deck_cards").delete().eq("deck_id", deck.id);
+      if (deleteCardsError) {
+        setSaveStatus("No se pudieron guardar cartas del deck");
+        return;
+      }
+
+      if (deck.cards.length > 0) {
+        const { error: insertCardsError } = await supabase.from("deck_cards").insert(
+          deck.cards.map((deckCard) => ({
+            deck_id: deck.id,
+            card_number: deckCard.cardNumber ?? deckCard.cardId,
+            quantity_required: deckCard.quantityRequired,
+          })),
+        );
+
+        if (insertCardsError) {
+          setSaveStatus("No se pudieron guardar cartas del deck");
+          return;
+        }
+      }
+    }
+
+    setSaveStatus("Sincronizado");
+  }
+
+  useEffect(() => {
+    if (!user) return;
+
+    queueMicrotask(() => {
+      loadRemoteUserData(user.id);
+    });
+  }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!user || !hasLoadedRemoteData) return;
+
+    const timeoutId = window.setTimeout(() => {
+      syncCollection(user.id, collection);
+    }, 600);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [collection, hasLoadedRemoteData, user]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!user || !hasLoadedRemoteData) return;
+
+    const timeoutId = window.setTimeout(() => {
+      syncDecks(user.id, decks);
+    }, 600);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [decks, hasLoadedRemoteData, user]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function setOwnedQuantity(cardId: string, quantity: number) {
     setCollection((current) => {
@@ -196,12 +382,15 @@ export default function Home() {
 
   function createDeck(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!user) return;
+
     const name = newDeckName.trim();
     if (!name) return;
 
     const now = new Date().toISOString();
     const deck: Deck = {
-      id: `deck_${Date.now()}`,
+      id: crypto.randomUUID(),
+      userId: user.id,
       name,
       createdAt: now,
       updatedAt: now,
@@ -311,7 +500,7 @@ export default function Home() {
             </span>
             <span>
               <span className="block text-lg font-bold leading-tight">Tamer Binder</span>
-              <span className="block text-xs text-[#60706d]">{user.displayName}</span>
+              <span className="block text-xs text-[#60706d]">{user.displayName} · {saveStatus}</span>
             </span>
           </button>
           <button
@@ -1148,12 +1337,32 @@ function parseDeckLine(line: string) {
 
 function toUserProfile(user: SupabaseUser): UserProfile {
   return {
+    id: user.id,
     email: user.email ?? "",
     displayName:
       getStringMetadata(user.user_metadata.full_name) ??
       getStringMetadata(user.user_metadata.name) ??
       user.email?.split("@")[0] ??
       "Tamer",
+  };
+}
+
+function fromDeckRow(row: DeckRow): Deck {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    name: row.name,
+    description: row.description ?? undefined,
+    coverCardNumber: row.cover_card_number ?? undefined,
+    isPublic: row.is_public,
+    viewCount: row.view_count,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    cards: (row.deck_cards ?? []).map((deckCard) => ({
+      cardNumber: deckCard.card_number,
+      cardId: deckCard.card_number,
+      quantityRequired: deckCard.quantity_required,
+    })),
   };
 }
 

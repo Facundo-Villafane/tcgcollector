@@ -22,6 +22,7 @@ export type DigimonCard = {
 };
 
 export type UserProfile = {
+  id: string;
   email: string;
   displayName: string;
 };
@@ -36,9 +37,13 @@ export type DeckCard = {
 
 export type Deck = {
   id: string;
+  userId?: string;
   name: string;
   description?: string;
   coverCardNumber?: string;
+  isPublic?: boolean;
+  viewCount?: number;
+  likeCount?: number;
   createdAt: string;
   updatedAt: string;
   cards: DeckCard[];
