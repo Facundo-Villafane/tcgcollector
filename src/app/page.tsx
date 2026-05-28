@@ -7,7 +7,9 @@ import {
   ChevronLeft,
   ChevronRight,
   ClipboardList,
+  Images,
   Library,
+  List,
   Minus,
   Plus,
   Search,
@@ -55,6 +57,8 @@ export default function Home() {
   const [activeDeckId, setActiveDeckId] = useState("");
   const [newDeckName, setNewDeckName] = useState("");
   const [selectedCard, setSelectedCard] = useState<DigimonCard | null>(null);
+  const [selectedCardOwnedOverride, setSelectedCardOwnedOverride] = useState<number | null>(null);
+  const [showDeckImages, setShowDeckImages] = useState(true);
 
   useEffect(() => {
     queueMicrotask(() => {
@@ -147,7 +151,14 @@ export default function Home() {
   const sets = useMemo(() => unique(cards.map((card) => card.setCode)).sort(), [cards]);
   const activeDeck = decks.find((deck) => deck.id === activeDeckId) ?? decks[0];
   const ownedByCardNumber = useMemo(() => getOwnedByCardNumber(collection, cardsById), [collection, cardsById]);
-  const deckStats = useMemo(() => decks.map((deck) => getDeckStats(deck, ownedByCardNumber)), [decks, ownedByCardNumber]);
+  const deckStats = useMemo(
+    () => decks.map((deck) => getDeckStats(deck, ownedByCardNumber, cardsByNumber)),
+    [decks, ownedByCardNumber, cardsByNumber],
+  );
+  const activeDeckCards = useMemo(
+    () => splitDeckCards(activeDeck, cardsByNumber),
+    [activeDeck, cardsByNumber],
+  );
   const totalMissingCopies = deckStats.reduce((sum, stat) => sum + stat.missingCopies, 0);
   const ownedCopies = Object.values(collection).reduce((sum, quantity) => sum + quantity, 0);
 
@@ -367,7 +378,10 @@ export default function Home() {
                     key={card.id}
                     card={card}
                     owned={collection[card.id] ?? 0}
-                    onOpen={() => setSelectedCard(card)}
+                    onOpen={() => {
+                      setSelectedCardOwnedOverride(null);
+                      setSelectedCard(card);
+                    }}
                     onSetOwned={(quantity) => setOwnedQuantity(card.id, quantity)}
                     onAddToDeck={
                       activeDeck
@@ -412,7 +426,7 @@ export default function Home() {
               <div className="space-y-2">
                 {decks.length === 0 && <EmptyState title="Sin decks" detail="Creá tu primer deck para comparar con tu colección." />}
                 {decks.map((deck) => {
-                  const stats = getDeckStats(deck, ownedByCardNumber);
+                  const stats = getDeckStats(deck, ownedByCardNumber, cardsByNumber);
                   return (
                     <button
                       key={deck.id}
@@ -434,7 +448,7 @@ export default function Home() {
             <div className="space-y-4">
               {activeDeck ? (
                 <>
-                  <DeckEditorHeader deck={activeDeck} stats={getDeckStats(activeDeck, ownedByCardNumber)} onDelete={() => deleteDeck(activeDeck.id)} />
+                  <DeckEditorHeader deck={activeDeck} stats={getDeckStats(activeDeck, ownedByCardNumber, cardsByNumber)} onDelete={() => deleteDeck(activeDeck.id)} />
                   <DeckImportPanel onImport={(text) => importDeckList(activeDeck.id, text)} disabled={cards.length === 0} />
                   <Filters
                     query={query}
@@ -452,21 +466,38 @@ export default function Home() {
                   <div className="grid gap-3">
                     {activeDeck.cards.length > 0 && (
                       <div className="space-y-2">
-                        <h2 className="text-sm font-bold uppercase tracking-wide text-[#60706d]">Cartas del deck</h2>
-                        {activeDeck.cards.map((deckCard) => {
-                          const cardNumber = deckCard.cardNumber ?? deckCard.cardId;
-                          const card = cardsByNumber.get(normalizeCardNumber(cardNumber));
-                          if (!card) return null;
-                          return (
-                            <DeckCardRow
-                              key={cardNumber}
-                              card={card}
-                              required={deckCard.quantityRequired}
-                              owned={ownedByCardNumber[normalizeCardNumber(cardNumber)] ?? 0}
-                              onChange={(quantity) => setDeckQuantity(activeDeck.id, cardNumber, quantity)}
-                            />
-                          );
-                        })}
+                        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                          <h2 className="text-sm font-bold uppercase tracking-wide text-[#60706d]">Cartas del deck</h2>
+                          <button
+                            className="flex w-fit items-center gap-2 rounded-md border border-[#c9d2cd] bg-white px-3 py-2 text-sm font-semibold"
+                            onClick={() => setShowDeckImages((current) => !current)}
+                          >
+                            {showDeckImages ? <List size={16} /> : <Images size={16} />}
+                            {showDeckImages ? "Vista compacta" : "Ver mini cartas"}
+                          </button>
+                        </div>
+                        <DeckSection
+                          title={`Main Deck (${activeDeckCards.mainCount})`}
+                          items={activeDeckCards.main}
+                          ownedByCardNumber={ownedByCardNumber}
+                          showImages={showDeckImages}
+                          onChange={(cardNumber, quantity) => setDeckQuantity(activeDeck.id, cardNumber, quantity)}
+                          onOpen={(card) => {
+                            setSelectedCardOwnedOverride(ownedByCardNumber[normalizeCardNumber(card.cardNumber)] ?? 0);
+                            setSelectedCard(card);
+                          }}
+                        />
+                        <DeckSection
+                          title={`Digi-Egg Deck (${activeDeckCards.eggCount})`}
+                          items={activeDeckCards.eggs}
+                          ownedByCardNumber={ownedByCardNumber}
+                          showImages={showDeckImages}
+                          onChange={(cardNumber, quantity) => setDeckQuantity(activeDeck.id, cardNumber, quantity)}
+                          onOpen={(card) => {
+                            setSelectedCardOwnedOverride(ownedByCardNumber[normalizeCardNumber(card.cardNumber)] ?? 0);
+                            setSelectedCard(card);
+                          }}
+                        />
                       </div>
                     )}
 
@@ -502,9 +533,16 @@ export default function Home() {
       {selectedCard && (
         <CardDetail
           card={selectedCard}
-          owned={collection[selectedCard.id] ?? 0}
-          onClose={() => setSelectedCard(null)}
-          onSetOwned={(quantity) => setOwnedQuantity(selectedCard.id, quantity)}
+          owned={selectedCardOwnedOverride ?? collection[selectedCard.id] ?? 0}
+          onClose={() => {
+            setSelectedCard(null);
+            setSelectedCardOwnedOverride(null);
+          }}
+          onSetOwned={(quantity) => {
+            if (selectedCardOwnedOverride === null) {
+              setOwnedQuantity(selectedCard.id, quantity);
+            }
+          }}
         />
       )}
     </main>
@@ -768,13 +806,71 @@ function DeckImportPanel({ onImport, disabled }: { onImport: (text: string) => D
   );
 }
 
-function DeckCardRow({ card, required, owned, onChange }: { card: DigimonCard; required: number; owned: number; onChange: (quantity: number) => void }) {
+function DeckSection({
+  title,
+  items,
+  ownedByCardNumber,
+  showImages,
+  onChange,
+  onOpen,
+}: {
+  title: string;
+  items: Array<{ cardNumber: string; card: DigimonCard; quantityRequired: number }>;
+  ownedByCardNumber: CollectionMap;
+  showImages: boolean;
+  onChange: (cardNumber: string, quantity: number) => void;
+  onOpen: (card: DigimonCard) => void;
+}) {
+  if (items.length === 0) return null;
+
+  return (
+    <div className="space-y-2">
+      <h3 className="text-sm font-bold text-[#1b2424]">{title}</h3>
+      <div className="grid gap-2">
+        {items.map((item) => (
+          <DeckCardRow
+            key={item.cardNumber}
+            card={item.card}
+            required={item.quantityRequired}
+            owned={ownedByCardNumber[normalizeCardNumber(item.cardNumber)] ?? 0}
+            showImage={showImages}
+            onOpen={() => onOpen(item.card)}
+            onChange={(quantity) => onChange(item.cardNumber, quantity)}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function DeckCardRow({
+  card,
+  required,
+  owned,
+  showImage,
+  onOpen,
+  onChange,
+}: {
+  card: DigimonCard;
+  required: number;
+  owned: number;
+  showImage: boolean;
+  onOpen: () => void;
+  onChange: (quantity: number) => void;
+}) {
   const missing = Math.max(required - owned, 0);
 
   return (
-    <article className="grid gap-3 rounded-md border border-[#d9ded6] bg-white p-3 shadow-sm sm:grid-cols-[1fr_auto] sm:items-center">
+    <article className={`grid gap-3 rounded-md border border-[#d9ded6] bg-white p-3 shadow-sm ${showImage ? "grid-cols-[72px_1fr] sm:grid-cols-[82px_1fr_auto]" : "sm:grid-cols-[1fr_auto]"} sm:items-center`}>
+      {showImage && (
+        <button className="overflow-hidden rounded-md bg-[#eef0e9]" onClick={onOpen} title="Ver carta">
+          <img className="aspect-[5/7] h-full w-full object-cover" src={card.imageUrl} alt={card.name} loading="lazy" />
+        </button>
+      )}
       <div className="min-w-0">
-        <h3 className="truncate font-semibold">{card.name}</h3>
+        <button className="max-w-full truncate text-left font-semibold" onClick={onOpen}>
+          {card.name}
+        </button>
         <p className="text-sm text-[#60706d]">
           {card.cardNumber} · Necesito {required} · Tengo {owned}
         </p>
@@ -805,7 +901,17 @@ function AddDeckCardTile({ card, required, owned, onChange }: { card: DigimonCar
   );
 }
 
-function CardDetail({ card, owned, onClose, onSetOwned }: { card: DigimonCard; owned: number; onClose: () => void; onSetOwned: (quantity: number) => void }) {
+function CardDetail({
+  card,
+  owned,
+  onClose,
+  onSetOwned,
+}: {
+  card: DigimonCard;
+  owned: number;
+  onClose: () => void;
+  onSetOwned: (quantity: number) => void;
+}) {
   return (
     <div className="fixed inset-0 z-30 grid place-items-end bg-black/45 p-0 sm:place-items-center sm:p-4" onClick={onClose}>
       <section className="max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-t-md bg-white p-4 shadow-lg sm:rounded-md" onClick={(event) => event.stopPropagation()}>
@@ -864,15 +970,18 @@ function EmptyState({ title, detail }: { title: string; detail: string }) {
   );
 }
 
-function getDeckStats(deck: Deck, ownedByCardNumber: CollectionMap) {
+function getDeckStats(deck: Deck, ownedByCardNumber: CollectionMap, cardsByNumber?: Map<string, DigimonCard>) {
   return deck.cards.reduce(
     (stats, deckCard) => {
-      const owned = ownedByCardNumber[normalizeCardNumber(deckCard.cardNumber ?? deckCard.cardId)] ?? 0;
+      const cardNumber = deckCard.cardNumber ?? deckCard.cardId;
+      const card = cardsByNumber?.get(normalizeCardNumber(cardNumber));
+      const owned = ownedByCardNumber[normalizeCardNumber(cardNumber)] ?? 0;
       const missing = Math.max(deckCard.quantityRequired - owned, 0);
+      const isDigiEgg = card?.type === "Digi-Egg";
 
       return {
-        totalCards: stats.totalCards + deckCard.quantityRequired,
-        eggCards: stats.eggCards,
+        totalCards: stats.totalCards + (isDigiEgg ? 0 : deckCard.quantityRequired),
+        eggCards: stats.eggCards + (isDigiEgg ? deckCard.quantityRequired : 0),
         missingDistinct: stats.missingDistinct + (missing > 0 ? 1 : 0),
         missingCopies: stats.missingCopies + missing,
       };
@@ -1000,6 +1109,31 @@ function getOwnedByCardNumber(collection: CollectionMap, cardsById: Map<string, 
   }
 
   return ownedByCardNumber;
+}
+
+function splitDeckCards(deck: Deck | undefined, cardsByNumber: Map<string, DigimonCard>) {
+  const main: Array<{ cardNumber: string; card: DigimonCard; quantityRequired: number }> = [];
+  const eggs: Array<{ cardNumber: string; card: DigimonCard; quantityRequired: number }> = [];
+
+  for (const deckCard of deck?.cards ?? []) {
+    const cardNumber = deckCard.cardNumber ?? deckCard.cardId;
+    const card = cardsByNumber.get(normalizeCardNumber(cardNumber));
+    if (!card) continue;
+
+    const item = { cardNumber, card, quantityRequired: deckCard.quantityRequired };
+    if (card.type === "Digi-Egg") {
+      eggs.push(item);
+    } else {
+      main.push(item);
+    }
+  }
+
+  return {
+    main,
+    eggs,
+    mainCount: main.reduce((sum, item) => sum + item.quantityRequired, 0),
+    eggCount: eggs.reduce((sum, item) => sum + item.quantityRequired, 0),
+  };
 }
 
 function unique(values: string[]) {
