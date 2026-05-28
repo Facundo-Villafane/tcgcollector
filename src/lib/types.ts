@@ -38,6 +38,7 @@ export type Deck = {
   id: string;
   name: string;
   description?: string;
+  coverCardNumber?: string;
   createdAt: string;
   updatedAt: string;
   cards: DeckCard[];

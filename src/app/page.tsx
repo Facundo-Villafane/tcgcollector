@@ -7,6 +7,7 @@ import {
   ChevronLeft,
   ChevronRight,
   ClipboardList,
+  Crown,
   Images,
   Library,
   List,
@@ -284,6 +285,14 @@ export default function Home() {
     }
   }
 
+  function updateDeckDetails(deckId: string, details: Partial<Pick<Deck, "description" | "coverCardNumber">>) {
+    setDecks((current) =>
+      current.map((deck) =>
+        deck.id === deckId ? { ...deck, ...details, updatedAt: new Date().toISOString() } : deck,
+      ),
+    );
+  }
+
   if (isAuthLoading) {
     return <EmptyPage title="Cargando sesión" detail="Estamos revisando tu login de Supabase." />;
   }
@@ -448,7 +457,13 @@ export default function Home() {
             <div className="space-y-4">
               {activeDeck ? (
                 <>
-                  <DeckEditorHeader deck={activeDeck} stats={getDeckStats(activeDeck, ownedByCardNumber, cardsByNumber)} onDelete={() => deleteDeck(activeDeck.id)} />
+                  <DeckEditorHeader
+                    deck={activeDeck}
+                    coverCard={getDeckCoverCard(activeDeck, activeDeckCards.all, cardsByNumber)}
+                    stats={getDeckStats(activeDeck, ownedByCardNumber, cardsByNumber)}
+                    onDescriptionChange={(description) => updateDeckDetails(activeDeck.id, { description })}
+                    onDelete={() => deleteDeck(activeDeck.id)}
+                  />
                   <DeckImportPanel onImport={(text) => importDeckList(activeDeck.id, text)} disabled={cards.length === 0} />
                   <Filters
                     query={query}
@@ -486,6 +501,8 @@ export default function Home() {
                             setSelectedCardOwnedOverride(ownedByCardNumber[normalizeCardNumber(card.cardNumber)] ?? 0);
                             setSelectedCard(card);
                           }}
+                          coverCardNumber={activeDeck.coverCardNumber}
+                          onSetCover={(cardNumber) => updateDeckDetails(activeDeck.id, { coverCardNumber: cardNumber })}
                         />
                         <DeckSection
                           title={`Digi-Egg Deck (${activeDeckCards.eggCount})`}
@@ -497,6 +514,8 @@ export default function Home() {
                             setSelectedCardOwnedOverride(ownedByCardNumber[normalizeCardNumber(card.cardNumber)] ?? 0);
                             setSelectedCard(card);
                           }}
+                          coverCardNumber={activeDeck.coverCardNumber}
+                          onSetCover={(cardNumber) => updateDeckDetails(activeDeck.id, { coverCardNumber: cardNumber })}
                         />
                       </div>
                     )}
@@ -592,7 +611,7 @@ function NavButton({ icon, label, active, onClick }: { icon: React.ReactNode; la
 
 function Metric({ label, value, detail }: { label: string; value: string; detail: string }) {
   return (
-    <div className="rounded-md border border-[#d9ded6] bg-white p-4 shadow-sm">
+    <div className="overflow-hidden rounded-md border border-[#d9ded6] bg-white shadow-sm">
       <p className="text-sm text-[#60706d]">{label}</p>
       <p className="mt-2 text-3xl font-bold">{value}</p>
       <p className="text-sm text-[#60706d]">{detail}</p>
@@ -726,24 +745,60 @@ function DeckSummary({ decks, stats, onOpen }: { decks: Deck[]; stats: ReturnTyp
   );
 }
 
-function DeckEditorHeader({ deck, stats, onDelete }: { deck: Deck; stats: ReturnType<typeof getDeckStats>; onDelete: () => void }) {
+function DeckEditorHeader({
+  deck,
+  coverCard,
+  stats,
+  onDescriptionChange,
+  onDelete,
+}: {
+  deck: Deck;
+  coverCard?: DigimonCard;
+  stats: ReturnType<typeof getDeckStats>;
+  onDescriptionChange: (description: string) => void;
+  onDelete: () => void;
+}) {
   return (
     <div className="rounded-md border border-[#d9ded6] bg-white p-4 shadow-sm">
+      <div
+        className="min-h-44 p-4 text-white"
+        style={{
+          backgroundImage: coverCard
+            ? `linear-gradient(90deg, rgba(20,28,32,0.96), rgba(20,28,32,0.72), rgba(20,28,32,0.2)), url(${coverCard.imageUrl})`
+            : "linear-gradient(135deg, #127d84, #1b2424)",
+          backgroundPosition: "center",
+          backgroundSize: "cover",
+        }}
+      >
       <div className="flex items-start justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold">{deck.name}</h1>
-          <p className="text-sm text-[#60706d]">
+          <h1 className="text-3xl font-bold">{deck.name}</h1>
+          <p className="mt-2 text-sm text-white/80">
             Main deck: {stats.totalCards} / 50 · Digi-Egg: {stats.eggCards} / 5
           </p>
+          {coverCard && <p className="mt-2 text-sm font-semibold text-[#f4c430]">Portada: {coverCard.name}</p>}
         </div>
-        <button className="grid h-10 w-10 place-items-center rounded-md border border-[#d9ded6] text-[#a33131]" title="Eliminar deck" onClick={onDelete}>
+        <button className="grid h-10 w-10 place-items-center rounded-md border border-white/25 bg-black/20 text-white" title="Eliminar deck" onClick={onDelete}>
           <Trash2 size={18} />
         </button>
       </div>
+      </div>
+      <div className="p-4">
+        <label className="text-xs font-bold uppercase tracking-wide text-[#60706d]" htmlFor={`deck-description-${deck.id}`}>
+          Deck primer
+        </label>
+        <textarea
+          id={`deck-description-${deck.id}`}
+          className="mt-2 min-h-20 w-full resize-y rounded-md border border-[#c9d2cd] px-3 py-2 outline-none focus:border-[#127d84]"
+          value={deck.description ?? ""}
+          onChange={(event) => onDescriptionChange(event.target.value)}
+          placeholder="Notas, plan de juego o idea principal del deck..."
+        />
       <div className="mt-4 grid gap-2 sm:grid-cols-3">
         <Metric label="Cartas distintas" value={deck.cards.length.toString()} detail="en la lista" />
         <Metric label="Faltan distintas" value={stats.missingDistinct.toString()} detail="cartas no completas" />
         <Metric label="Faltan copias" value={stats.missingCopies.toString()} detail="total requerido" />
+      </div>
       </div>
     </div>
   );
@@ -813,6 +868,8 @@ function DeckSection({
   showImages,
   onChange,
   onOpen,
+  coverCardNumber,
+  onSetCover,
 }: {
   title: string;
   items: Array<{ cardNumber: string; card: DigimonCard; quantityRequired: number }>;
@@ -820,6 +877,8 @@ function DeckSection({
   showImages: boolean;
   onChange: (cardNumber: string, quantity: number) => void;
   onOpen: (card: DigimonCard) => void;
+  coverCardNumber?: string;
+  onSetCover: (cardNumber: string) => void;
 }) {
   if (items.length === 0) return null;
 
@@ -836,6 +895,8 @@ function DeckSection({
             showImage={showImages}
             onOpen={() => onOpen(item.card)}
             onChange={(quantity) => onChange(item.cardNumber, quantity)}
+            isCover={normalizeCardNumber(coverCardNumber ?? "") === normalizeCardNumber(item.cardNumber)}
+            onSetCover={() => onSetCover(item.cardNumber)}
           />
         ))}
       </div>
@@ -850,6 +911,8 @@ function DeckCardRow({
   showImage,
   onOpen,
   onChange,
+  isCover,
+  onSetCover,
 }: {
   card: DigimonCard;
   required: number;
@@ -857,11 +920,16 @@ function DeckCardRow({
   showImage: boolean;
   onOpen: () => void;
   onChange: (quantity: number) => void;
+  isCover: boolean;
+  onSetCover: () => void;
 }) {
   const missing = Math.max(required - owned, 0);
 
   return (
-    <article className={`grid gap-3 rounded-md border border-[#d9ded6] bg-white p-3 shadow-sm ${showImage ? "grid-cols-[72px_1fr] sm:grid-cols-[82px_1fr_auto]" : "sm:grid-cols-[1fr_auto]"} sm:items-center`}>
+    <article
+      className={`grid gap-3 rounded-md border p-3 shadow-sm ${showImage ? "grid-cols-[72px_1fr] sm:grid-cols-[82px_1fr_auto]" : "sm:grid-cols-[1fr_auto]"} sm:items-center ${isCover ? "border-[#f4c430]" : "border-[#d9ded6]"}`}
+      style={{ background: getCardRowBackground(card.color) }}
+    >
       {showImage && (
         <button className="overflow-hidden rounded-md bg-[#eef0e9]" onClick={onOpen} title="Ver carta">
           <img className="aspect-[5/7] h-full w-full object-cover" src={card.imageUrl} alt={card.name} loading="lazy" />
@@ -879,7 +947,16 @@ function DeckCardRow({
           {missing === 0 ? "Completa" : `Falta ${missing}`}
         </p>
       </div>
-      <QuantityStepper value={required} onChange={onChange} label="Deck" />
+      <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+        <button
+          className={`grid h-9 w-9 place-items-center rounded-md border ${isCover ? "border-[#f4c430] bg-[#f4c430] text-[#1b2424]" : "border-[#c9d2cd] bg-white/80 text-[#60706d]"}`}
+          title={isCover ? "Portada actual" : "Usar como portada"}
+          onClick={onSetCover}
+        >
+          <Crown size={16} />
+        </button>
+        <QuantityStepper value={required} onChange={onChange} label="Deck" />
+      </div>
     </article>
   );
 }
@@ -1131,9 +1208,46 @@ function splitDeckCards(deck: Deck | undefined, cardsByNumber: Map<string, Digim
   return {
     main,
     eggs,
+    all: [...main, ...eggs],
     mainCount: main.reduce((sum, item) => sum + item.quantityRequired, 0),
     eggCount: eggs.reduce((sum, item) => sum + item.quantityRequired, 0),
   };
+}
+
+function getDeckCoverCard(
+  deck: Deck | undefined,
+  deckCards: Array<{ cardNumber: string; card: DigimonCard }>,
+  cardsByNumber: Map<string, DigimonCard>,
+) {
+  const coverNumber = deck?.coverCardNumber;
+  if (coverNumber) {
+    const cover = cardsByNumber.get(normalizeCardNumber(coverNumber));
+    if (cover) return cover;
+  }
+
+  return deckCards.find((item) => item.card.type !== "Digi-Egg")?.card ?? deckCards[0]?.card;
+}
+
+function getCardRowBackground(colors: string[]) {
+  const palette: Record<string, string> = {
+    Red: "#ffe6e2",
+    Blue: "#e4efff",
+    Yellow: "#fff5cf",
+    Green: "#ddf6e4",
+    Purple: "#efe6ff",
+    Black: "#e5e7eb",
+    White: "#ffffff",
+  };
+  const stops = colors.map((color) => palette[color] ?? "#f7f7f2");
+
+  if (stops.length <= 1) {
+    return `linear-gradient(90deg, ${stops[0] ?? "#ffffff"}, rgba(255,255,255,0.92) 62%)`;
+  }
+
+  const step = 100 / stops.length;
+  return `linear-gradient(135deg, ${stops
+    .map((stop, index) => `${stop} ${Math.round(index * step)}%, ${stop} ${Math.round((index + 1) * step)}%`)
+    .join(", ")})`;
 }
 
 function unique(values: string[]) {
