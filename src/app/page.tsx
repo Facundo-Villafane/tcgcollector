@@ -1210,11 +1210,43 @@ function CardDetail({
                 <QuantityStepper value={owned} onChange={onSetOwned} label="Tengo" />
               </div>
             </div>
-            {card.effect && <p className="rounded-md bg-[#f7f7f2] p-3 text-sm leading-6">{card.effect}</p>}
+            {card.effect && (
+              <p className="rounded-md bg-[#f7f7f2] p-3 text-sm leading-7">
+                <HighlightedEffectText text={card.effect} />
+              </p>
+            )}
           </div>
         </div>
       </section>
     </div>
+  );
+}
+
+function HighlightedEffectText({ text }: { text: string }) {
+  const tokens = text.split(/(\[[^\]]+\]|<[^>]+>|＜[^＞]+＞)/g);
+
+  return (
+    <>
+      {tokens.map((token, index) => {
+        if (!token) return null;
+        if (token.startsWith("[") && token.endsWith("]")) {
+          return (
+            <span key={`${token}-${index}`} className="rounded bg-[#dfeeff] px-1.5 py-0.5 font-semibold text-[#1d5fa8]">
+              {token}
+            </span>
+          );
+        }
+        if ((token.startsWith("<") && token.endsWith(">")) || (token.startsWith("＜") && token.endsWith("＞"))) {
+          return (
+            <span key={`${token}-${index}`} className="rounded bg-[#e3f6df] px-1.5 py-0.5 font-semibold text-[#187a45]">
+              {token}
+            </span>
+          );
+        }
+
+        return <span key={`${token}-${index}`}>{token}</span>;
+      })}
+    </>
   );
 }
 
