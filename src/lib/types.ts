@@ -4,6 +4,9 @@ export type DigimonCard = {
   id: string;
   name: string;
   cardNumber: string;
+  variantLabel: string;
+  isAlternateArt: boolean;
+  parallelId: number;
   setCode: string;
   setName: string;
   color: string[];
@@ -26,6 +29,7 @@ export type UserProfile = {
 export type CollectionMap = Record<string, number>;
 
 export type DeckCard = {
+  cardNumber: string;
   cardId: string;
   quantityRequired: number;
 };

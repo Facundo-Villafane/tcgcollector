@@ -2,27 +2,34 @@ import { promises as fs } from "fs";
 import path from "path";
 import type { DigimonCard } from "@/lib/types";
 
-type ApiCard = {
-  name: string;
-  type: string;
-  id: string;
-  level?: number | null;
-  play_cost?: number | null;
-  evolution_cost?: number | null;
-  color?: string | null;
-  color2?: string | null;
-  rarity?: string | null;
-  dp?: number | null;
-  main_effect?: string | null;
-  source_effect?: string | null;
-  set_name?: string[] | string | null;
-  form?: string | null;
+type HeroiccCard = {
+  data: {
+    id: string;
+    attributes: {
+      name: string;
+      number: string;
+      category?: string | null;
+      "parallel-id"?: number | null;
+      level?: number | null;
+      dp?: number | null;
+      "play-cost"?: number | null;
+      "use-cost"?: number | null;
+      rarity?: string | null;
+      form?: string | null;
+      color?: string[] | null;
+      image?: string | null;
+      effect?: string | null;
+      "inherited-effect"?: string | null;
+      releases?: Array<{ name?: string | null }> | null;
+      "digivolution-requirements"?: Array<{ cost?: number | null }> | null;
+    };
+  };
 };
 
-const API_URL = "https://digimoncard.io/api-public/search?series=Digimon%20Card%20Game";
+const API_URL = "https://assets.heroi.cc/bulk-data/en-2026-05-27-090217.json";
 const USER_AGENT = "DigimonInventoryApp/1.0";
 const CACHE_TTL_MS = 1000 * 60 * 60 * 12;
-const CACHE_VERSION = 2;
+const CACHE_VERSION = 3;
 const CACHE_DIR = path.join(process.cwd(), ".cache");
 const CACHE_FILE = path.join(CACHE_DIR, "digimon-cards.json");
 
@@ -44,6 +51,7 @@ export async function getDigimonCards(): Promise<DigimonCard[]> {
   const response = await fetch(API_URL, {
     headers: {
       "User-Agent": USER_AGENT,
+      Accept: "application/json",
     },
     next: {
       revalidate: 60 * 60 * 12,
@@ -56,20 +64,14 @@ export async function getDigimonCards(): Promise<DigimonCard[]> {
       return diskCache.cards;
     }
 
-    throw new Error(`DigimonCard.io returned ${response.status}`);
+    throw new Error(`Heroicc returned ${response.status}`);
   }
 
-  const rawCards = (await response.json()) as ApiCard[];
-  const cardsByNumber = new Map<string, DigimonCard>();
-
-  for (const rawCard of rawCards) {
-    const card = normalizeCard(rawCard);
-    if (!cardsByNumber.has(card.cardNumber)) {
-      cardsByNumber.set(card.cardNumber, card);
-    }
-  }
-
-  const cards = Array.from(cardsByNumber.values()).sort((a, b) => a.cardNumber.localeCompare(b.cardNumber));
+  const rawCards = (await response.json()) as HeroiccCard[];
+  const cards = rawCards
+    .map(normalizeCard)
+    .filter((card): card is DigimonCard => Boolean(card))
+    .sort((a, b) => a.cardNumber.localeCompare(b.cardNumber) || a.parallelId - b.parallelId);
   const cache = { cards, fetchedAt: now, version: CACHE_VERSION };
 
   memoryCache = cache;
@@ -78,28 +80,47 @@ export async function getDigimonCards(): Promise<DigimonCard[]> {
   return cards;
 }
 
-function normalizeCard(card: ApiCard): DigimonCard {
-  const colors = [card.color, card.color2].filter(Boolean) as string[];
-  const setNames = Array.isArray(card.set_name) ? card.set_name : card.set_name ? [card.set_name] : [];
-  const setName = setNames[0] ?? "";
+function normalizeCard(card: HeroiccCard): DigimonCard | null {
+  const attributes = card.data.attributes;
+  const number = attributes.number;
+  const parallelId = attributes["parallel-id"] ?? 0;
+  const category = attributes.category ?? "";
+
+  if (!number || !attributes.name) {
+    return null;
+  }
 
   return {
-    id: card.id,
-    name: card.name,
-    cardNumber: card.id,
-    setCode: card.id.split("-")[0] ?? "",
-    setName,
-    color: colors.length > 0 ? colors : ["Colorless"],
-    type: card.type,
-    rarity: card.rarity ?? "Unknown",
-    level: card.level ?? undefined,
-    playCost: card.play_cost ?? undefined,
-    digivolveCost: card.evolution_cost ?? undefined,
-    dp: card.dp ?? undefined,
-    imageUrl: `https://images.digimoncard.io/images/cards/${card.id}.webp`,
-    effect: card.main_effect || card.source_effect || "",
-    form: card.form ?? undefined,
+    id: parallelId > 0 ? `${number}_P${parallelId}` : number,
+    name: attributes.name,
+    cardNumber: number,
+    variantLabel: parallelId > 0 ? `Alt Art P${parallelId}` : "Regular Art",
+    isAlternateArt: parallelId > 0,
+    parallelId,
+    setCode: number.split("-")[0] ?? "",
+    setName: attributes.releases?.[0]?.name ?? "",
+    color: attributes.color?.map(capitalize) ?? ["Colorless"],
+    type: category ? toCardType(category) : "Digimon",
+    rarity: attributes.rarity ?? "Unknown",
+    level: attributes.level ?? undefined,
+    playCost: attributes["play-cost"] ?? attributes["use-cost"] ?? undefined,
+    digivolveCost: attributes["digivolution-requirements"]?.[0]?.cost ?? undefined,
+    dp: attributes.dp ?? undefined,
+    imageUrl: attributes.image ?? `https://images.heroi.cc/cards/en/${number}.webp`,
+    effect: attributes.effect || attributes["inherited-effect"] || "",
+    form: attributes.form ?? undefined,
   };
+}
+
+function toCardType(category: string) {
+  const normalized = category.toLowerCase();
+
+  if (normalized === "digi-egg") return "Digi-Egg";
+  return capitalize(normalized);
+}
+
+function capitalize(value: string) {
+  return value.charAt(0).toUpperCase() + value.slice(1);
 }
 
 async function readDiskCache() {

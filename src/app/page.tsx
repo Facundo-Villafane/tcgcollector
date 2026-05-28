@@ -116,10 +116,7 @@ export default function Home() {
   }, [decks]);
 
   const cardsById = useMemo(() => new Map(cards.map((card) => [card.id, card])), [cards]);
-  const cardsByNumber = useMemo(
-    () => new Map(cards.map((card) => [normalizeCardNumber(card.cardNumber), card])),
-    [cards],
-  );
+  const cardsByNumber = useMemo(() => getRegularCardsByNumber(cards), [cards]);
   const collectionCards = useMemo(
     () => cards.filter((card) => (collection[card.id] ?? 0) > 0),
     [cards, collection],
@@ -149,7 +146,8 @@ export default function Home() {
   const types = useMemo(() => unique(cards.map((card) => card.type)).sort(), [cards]);
   const sets = useMemo(() => unique(cards.map((card) => card.setCode)).sort(), [cards]);
   const activeDeck = decks.find((deck) => deck.id === activeDeckId) ?? decks[0];
-  const deckStats = useMemo(() => decks.map((deck) => getDeckStats(deck, collection)), [decks, collection]);
+  const ownedByCardNumber = useMemo(() => getOwnedByCardNumber(collection, cardsById), [collection, cardsById]);
+  const deckStats = useMemo(() => decks.map((deck) => getDeckStats(deck, ownedByCardNumber)), [decks, ownedByCardNumber]);
   const totalMissingCopies = deckStats.reduce((sum, stat) => sum + stat.missingCopies, 0);
   const ownedCopies = Object.values(collection).reduce((sum, quantity) => sum + quantity, 0);
 
@@ -204,20 +202,27 @@ export default function Home() {
     setView("decks");
   }
 
-  function setDeckQuantity(deckId: string, cardId: string, quantityRequired: number) {
+  function setDeckQuantity(deckId: string, cardNumber: string, quantityRequired: number) {
     setDecks((current) =>
       current.map((deck) => {
         if (deck.id !== deckId) return deck;
 
-        const existing = deck.cards.find((deckCard) => deckCard.cardId === cardId);
+        const normalizedCardNumber = normalizeCardNumber(cardNumber);
+        const existing = deck.cards.find(
+          (deckCard) => normalizeCardNumber(deckCard.cardNumber ?? deckCard.cardId) === normalizedCardNumber,
+        );
         const nextCards =
           quantityRequired <= 0
-            ? deck.cards.filter((deckCard) => deckCard.cardId !== cardId)
+            ? deck.cards.filter(
+                (deckCard) => normalizeCardNumber(deckCard.cardNumber ?? deckCard.cardId) !== normalizedCardNumber,
+              )
             : existing
               ? deck.cards.map((deckCard) =>
-                  deckCard.cardId === cardId ? { ...deckCard, quantityRequired } : deckCard,
+                  normalizeCardNumber(deckCard.cardNumber ?? deckCard.cardId) === normalizedCardNumber
+                    ? { ...deckCard, cardNumber, cardId: cardNumber, quantityRequired }
+                    : deckCard,
                 )
-              : [...deck.cards, { cardId, quantityRequired }];
+              : [...deck.cards, { cardNumber, cardId: cardNumber, quantityRequired }];
 
         return { ...deck, cards: nextCards, updatedAt: new Date().toISOString() };
       }),
@@ -232,15 +237,21 @@ export default function Home() {
         current.map((deck) => {
           if (deck.id !== deckId) return deck;
 
-          const quantities = new Map(deck.cards.map((deckCard) => [deckCard.cardId, deckCard.quantityRequired]));
+          const quantities = new Map(
+            deck.cards.map((deckCard) => [deckCard.cardNumber ?? deckCard.cardId, deckCard.quantityRequired]),
+          );
 
           for (const deckCard of parsed.cards) {
-            quantities.set(deckCard.cardId, deckCard.quantityRequired);
+            quantities.set(deckCard.cardNumber, deckCard.quantityRequired);
           }
 
           return {
             ...deck,
-            cards: Array.from(quantities.entries()).map(([cardId, quantityRequired]) => ({ cardId, quantityRequired })),
+            cards: Array.from(quantities.entries()).map(([cardNumber, quantityRequired]) => ({
+              cardNumber,
+              cardId: cardNumber,
+              quantityRequired,
+            })),
             updatedAt: new Date().toISOString(),
           };
         }),
@@ -361,7 +372,7 @@ export default function Home() {
                     onAddToDeck={
                       activeDeck
                         ? () => {
-                            setDeckQuantity(activeDeck.id, card.id, 1);
+                            setDeckQuantity(activeDeck.id, card.cardNumber, 1);
                             setView("decks");
                           }
                         : undefined
@@ -401,7 +412,7 @@ export default function Home() {
               <div className="space-y-2">
                 {decks.length === 0 && <EmptyState title="Sin decks" detail="Creá tu primer deck para comparar con tu colección." />}
                 {decks.map((deck) => {
-                  const stats = getDeckStats(deck, collection);
+                  const stats = getDeckStats(deck, ownedByCardNumber);
                   return (
                     <button
                       key={deck.id}
@@ -423,7 +434,7 @@ export default function Home() {
             <div className="space-y-4">
               {activeDeck ? (
                 <>
-                  <DeckEditorHeader deck={activeDeck} stats={getDeckStats(activeDeck, collection)} onDelete={() => deleteDeck(activeDeck.id)} />
+                  <DeckEditorHeader deck={activeDeck} stats={getDeckStats(activeDeck, ownedByCardNumber)} onDelete={() => deleteDeck(activeDeck.id)} />
                   <DeckImportPanel onImport={(text) => importDeckList(activeDeck.id, text)} disabled={cards.length === 0} />
                   <Filters
                     query={query}
@@ -443,15 +454,16 @@ export default function Home() {
                       <div className="space-y-2">
                         <h2 className="text-sm font-bold uppercase tracking-wide text-[#60706d]">Cartas del deck</h2>
                         {activeDeck.cards.map((deckCard) => {
-                          const card = cardsById.get(deckCard.cardId);
+                          const cardNumber = deckCard.cardNumber ?? deckCard.cardId;
+                          const card = cardsByNumber.get(normalizeCardNumber(cardNumber));
                           if (!card) return null;
                           return (
                             <DeckCardRow
-                              key={deckCard.cardId}
+                              key={cardNumber}
                               card={card}
                               required={deckCard.quantityRequired}
-                              owned={collection[deckCard.cardId] ?? 0}
-                              onChange={(quantity) => setDeckQuantity(activeDeck.id, deckCard.cardId, quantity)}
+                              owned={ownedByCardNumber[normalizeCardNumber(cardNumber)] ?? 0}
+                              onChange={(quantity) => setDeckQuantity(activeDeck.id, cardNumber, quantity)}
                             />
                           );
                         })}
@@ -461,15 +473,17 @@ export default function Home() {
                     <div className="space-y-2">
                       <h2 className="text-sm font-bold uppercase tracking-wide text-[#60706d]">Agregar cartas</h2>
                       <div className="grid gap-3 sm:grid-cols-2">
-                        {filteredCards.slice(0, 20).map((card) => {
-                          const required = activeDeck.cards.find((deckCard) => deckCard.cardId === card.id)?.quantityRequired ?? 0;
+                        {filteredCards.filter((card) => !card.isAlternateArt).slice(0, 20).map((card) => {
+                          const required =
+                            activeDeck.cards.find((deckCard) => (deckCard.cardNumber ?? deckCard.cardId) === card.cardNumber)
+                              ?.quantityRequired ?? 0;
                           return (
                             <AddDeckCardTile
                               key={card.id}
                               card={card}
                               required={required}
-                              owned={collection[card.id] ?? 0}
-                              onChange={(quantity) => setDeckQuantity(activeDeck.id, card.id, quantity)}
+                              owned={ownedByCardNumber[normalizeCardNumber(card.cardNumber)] ?? 0}
+                              onChange={(quantity) => setDeckQuantity(activeDeck.id, card.cardNumber, quantity)}
                             />
                           );
                         })}
@@ -616,6 +630,9 @@ function CardTile({ card, owned, onOpen, onSetOwned, onAddToDeck }: { card: Digi
         <p className="text-sm text-[#60706d]">{card.cardNumber}</p>
         <p className="mt-1 line-clamp-1 text-sm text-[#60706d]">
           {card.color.join("/")} · {card.form ?? card.type} · {card.rarity.toUpperCase()}
+        </p>
+        <p className={`mt-1 text-xs font-semibold ${card.isAlternateArt ? "text-[#b14d19]" : "text-[#127d84]"}`}>
+          {card.variantLabel}
         </p>
         <div className="mt-3 flex items-center justify-between gap-2">
           <QuantityStepper value={owned} onChange={onSetOwned} label="Tengo" />
@@ -798,6 +815,9 @@ function CardDetail({ card, owned, onClose, onSetOwned }: { card: DigimonCard; o
             <p className="text-sm text-[#60706d]">
               {card.cardNumber} · {card.setName}
             </p>
+            <p className={`mt-1 text-sm font-semibold ${card.isAlternateArt ? "text-[#b14d19]" : "text-[#127d84]"}`}>
+              {card.variantLabel}
+            </p>
           </div>
           <button className="grid h-10 w-10 place-items-center rounded-md border border-[#c9d2cd]" onClick={onClose} title="Cerrar">
             ×
@@ -844,10 +864,10 @@ function EmptyState({ title, detail }: { title: string; detail: string }) {
   );
 }
 
-function getDeckStats(deck: Deck, collection: CollectionMap) {
+function getDeckStats(deck: Deck, ownedByCardNumber: CollectionMap) {
   return deck.cards.reduce(
     (stats, deckCard) => {
-      const owned = collection[deckCard.cardId] ?? 0;
+      const owned = ownedByCardNumber[normalizeCardNumber(deckCard.cardNumber ?? deckCard.cardId)] ?? 0;
       const missing = Math.max(deckCard.quantityRequired - owned, 0);
 
       return {
@@ -862,7 +882,7 @@ function getDeckStats(deck: Deck, collection: CollectionMap) {
 }
 
 function parseDeckList(text: string, cardsByNumber: Map<string, DigimonCard>) {
-  const cardsById = new Map<string, Deck["cards"][number]>();
+  const parsedCardsByNumber = new Map<string, Deck["cards"][number]>();
   const notFound: string[] = [];
   const ignored: string[] = [];
   const duplicateCards: string[] = [];
@@ -883,20 +903,23 @@ function parseDeckList(text: string, cardsByNumber: Map<string, DigimonCard>) {
       continue;
     }
 
-    if (cardsById.has(card.id)) {
+    const normalizedCardNumber = normalizeCardNumber(card.cardNumber);
+
+    if (parsedCardsByNumber.has(normalizedCardNumber)) {
       duplicateCards.push(card.cardNumber);
       continue;
     }
 
-    cardsById.set(card.id, {
-      cardId: card.id,
+    parsedCardsByNumber.set(normalizedCardNumber, {
+      cardNumber: card.cardNumber,
+      cardId: card.cardNumber,
       quantityRequired: parsedLine.quantity,
     });
   }
 
   const duplicateNotes = unique(duplicateCards).map((cardNumber) => `${cardNumber} duplicada`);
 
-  return { cards: Array.from(cardsById.values()), notFound: unique(notFound), ignored: [...ignored, ...duplicateNotes] };
+  return { cards: Array.from(parsedCardsByNumber.values()), notFound: unique(notFound), ignored: [...ignored, ...duplicateNotes] };
 }
 
 function parseDeckLine(line: string) {
@@ -952,12 +975,39 @@ function getStringMetadata(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
+function getRegularCardsByNumber(cards: DigimonCard[]) {
+  const cardsByNumber = new Map<string, DigimonCard>();
+
+  for (const card of cards) {
+    const key = normalizeCardNumber(card.cardNumber);
+    const current = cardsByNumber.get(key);
+    if (!current || card.parallelId < current.parallelId) {
+      cardsByNumber.set(key, card);
+    }
+  }
+
+  return cardsByNumber;
+}
+
+function getOwnedByCardNumber(collection: CollectionMap, cardsById: Map<string, DigimonCard>) {
+  const ownedByCardNumber: CollectionMap = {};
+
+  for (const [variantId, quantity] of Object.entries(collection)) {
+    const card = cardsById.get(variantId);
+    const cardNumber = card?.cardNumber ?? variantId;
+    const key = normalizeCardNumber(cardNumber);
+    ownedByCardNumber[key] = (ownedByCardNumber[key] ?? 0) + quantity;
+  }
+
+  return ownedByCardNumber;
+}
+
 function unique(values: string[]) {
   return Array.from(new Set(values.filter(Boolean)));
 }
 
 function normalizeCardNumber(cardNumber: string) {
-  return cardNumber.trim().toUpperCase();
+  return cardNumber.trim().toUpperCase().replace(/_P\d+$/, "");
 }
 
 function readStorage<T>(key: string, fallback: T): T {
