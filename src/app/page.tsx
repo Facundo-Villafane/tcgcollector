@@ -6,6 +6,7 @@ import {
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
+  ClipboardList,
   Library,
   Minus,
   Plus,
@@ -26,7 +27,15 @@ const STORAGE_KEYS = {
   decks: "tamer-binder:decks",
 };
 
-const quantityOptions = [0, 1, 2, 3, 4, 5, 6, 7, 8];
+const maxDeckQuantity = 12;
+const quantityOptions = Array.from({ length: maxDeckQuantity + 1 }, (_value, index) => index);
+
+type DeckImportResult = {
+  importedLines: number;
+  importedCopies: number;
+  notFound: string[];
+  ignored: string[];
+};
 
 export default function Home() {
   const supabase = useMemo(() => createClient(), []);
@@ -107,6 +116,10 @@ export default function Home() {
   }, [decks]);
 
   const cardsById = useMemo(() => new Map(cards.map((card) => [card.id, card])), [cards]);
+  const cardsByNumber = useMemo(
+    () => new Map(cards.map((card) => [normalizeCardNumber(card.cardNumber), card])),
+    [cards],
+  );
   const collectionCards = useMemo(
     () => cards.filter((card) => (collection[card.id] ?? 0) > 0),
     [cards, collection],
@@ -209,6 +222,38 @@ export default function Home() {
         return { ...deck, cards: nextCards, updatedAt: new Date().toISOString() };
       }),
     );
+  }
+
+  function importDeckList(deckId: string, text: string): DeckImportResult {
+    const parsed = parseDeckList(text, cardsByNumber);
+
+    if (parsed.cards.length > 0) {
+      setDecks((current) =>
+        current.map((deck) => {
+          if (deck.id !== deckId) return deck;
+
+          const quantities = new Map(deck.cards.map((deckCard) => [deckCard.cardId, deckCard.quantityRequired]));
+
+          for (const deckCard of parsed.cards) {
+            const currentQuantity = quantities.get(deckCard.cardId) ?? 0;
+            quantities.set(deckCard.cardId, Math.min(currentQuantity + deckCard.quantityRequired, maxDeckQuantity));
+          }
+
+          return {
+            ...deck,
+            cards: Array.from(quantities.entries()).map(([cardId, quantityRequired]) => ({ cardId, quantityRequired })),
+            updatedAt: new Date().toISOString(),
+          };
+        }),
+      );
+    }
+
+    return {
+      importedLines: parsed.cards.length,
+      importedCopies: parsed.cards.reduce((sum, deckCard) => sum + deckCard.quantityRequired, 0),
+      notFound: parsed.notFound,
+      ignored: parsed.ignored,
+    };
   }
 
   function deleteDeck(deckId: string) {
@@ -380,6 +425,7 @@ export default function Home() {
               {activeDeck ? (
                 <>
                   <DeckEditorHeader deck={activeDeck} stats={getDeckStats(activeDeck, collection)} onDelete={() => deleteDeck(activeDeck.id)} />
+                  <DeckImportPanel onImport={(text) => importDeckList(activeDeck.id, text)} disabled={cards.length === 0} />
                   <Filters
                     query={query}
                     setQuery={setQuery}
@@ -649,6 +695,63 @@ function DeckEditorHeader({ deck, stats, onDelete }: { deck: Deck; stats: Return
   );
 }
 
+function DeckImportPanel({ onImport, disabled }: { onImport: (text: string) => DeckImportResult; disabled: boolean }) {
+  const [text, setText] = useState("");
+  const [result, setResult] = useState<DeckImportResult | null>(null);
+
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const nextResult = onImport(text);
+    setResult(nextResult);
+    if (nextResult.importedLines > 0) {
+      setText("");
+    }
+  }
+
+  return (
+    <form className="rounded-md border border-[#d9ded6] bg-white p-4 shadow-sm" onSubmit={handleSubmit}>
+      <div className="flex items-start gap-3">
+        <span className="grid h-10 w-10 shrink-0 place-items-center rounded-md bg-[#f4c430] text-[#1b2424]">
+          <ClipboardList size={20} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <h2 className="font-bold">Importar lista</h2>
+          <p className="mt-1 text-sm text-[#60706d]">Pegá una lista con cantidad y número de carta.</p>
+        </div>
+      </div>
+      <textarea
+        className="mt-3 min-h-32 w-full resize-y rounded-md border border-[#c9d2cd] bg-white px-3 py-2 text-sm leading-6 outline-none focus:border-[#127d84]"
+        value={text}
+        onChange={(event) => setText(event.target.value)}
+        placeholder={"4 BT1-010 Agumon\n4 BT1-015 Greymon\n2 BT1-084 Tai Kamiya"}
+      />
+      <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <p className="text-sm text-[#60706d]">También acepta formatos como BT1-010 x4 o 4x BT1-010.</p>
+        <button
+          className="flex items-center justify-center gap-2 rounded-md bg-[#127d84] px-4 py-2 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+          disabled={disabled || text.trim().length === 0}
+        >
+          <Plus size={17} />
+          Importar
+        </button>
+      </div>
+      {result && (
+        <div className="mt-3 rounded-md bg-[#f7f7f2] p-3 text-sm">
+          <p className="font-semibold">
+            {result.importedLines} líneas importadas · {result.importedCopies} copias agregadas
+          </p>
+          {result.notFound.length > 0 && (
+            <p className="mt-2 text-[#b14d19]">No encontré: {result.notFound.slice(0, 6).join(", ")}</p>
+          )}
+          {result.ignored.length > 0 && (
+            <p className="mt-2 text-[#60706d]">Ignoradas: {result.ignored.slice(0, 4).join(" | ")}</p>
+          )}
+        </div>
+      )}
+    </form>
+  );
+}
+
 function DeckCardRow({ card, required, owned, onChange }: { card: DigimonCard; required: number; owned: number; onChange: (quantity: number) => void }) {
   const missing = Math.max(required - owned, 0);
 
@@ -759,6 +862,73 @@ function getDeckStats(deck: Deck, collection: CollectionMap) {
   );
 }
 
+function parseDeckList(text: string, cardsByNumber: Map<string, DigimonCard>) {
+  const cards: Deck["cards"] = [];
+  const notFound: string[] = [];
+  const ignored: string[] = [];
+
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#") || line.startsWith("//")) continue;
+
+    const parsedLine = parseDeckLine(line);
+    if (!parsedLine) {
+      ignored.push(line);
+      continue;
+    }
+
+    const card = cardsByNumber.get(normalizeCardNumber(parsedLine.cardNumber));
+    if (!card) {
+      notFound.push(parsedLine.cardNumber);
+      continue;
+    }
+
+    cards.push({
+      cardId: card.id,
+      quantityRequired: parsedLine.quantity,
+    });
+  }
+
+  return { cards, notFound: unique(notFound), ignored };
+}
+
+function parseDeckLine(line: string) {
+  const normalized = line.replace(/\s+/g, " ");
+  const cardNumberPattern = "([A-Z]{1,4}\\d{0,2}-\\d{2,4})";
+  const patterns = [
+    new RegExp(`^(\\d{1,2})x?\\s+${cardNumberPattern}\\b`, "i"),
+    new RegExp(`^${cardNumberPattern}\\s+x?(\\d{1,2})\\b`, "i"),
+    new RegExp(`^${cardNumberPattern}\\b.*?\\sx(\\d{1,2})$`, "i"),
+  ];
+
+  for (const pattern of patterns) {
+    const match = normalized.match(pattern);
+    if (!match) continue;
+
+    const firstValue = match[1] ?? "";
+    const secondValue = match[2] ?? "";
+    const quantity = Number(/^\d/.test(firstValue) ? firstValue : secondValue);
+    const cardNumber = /^\d/.test(firstValue) ? secondValue : firstValue;
+
+    if (!quantity || !cardNumber) return null;
+
+    return {
+      cardNumber,
+      quantity: Math.min(Math.max(quantity, 1), maxDeckQuantity),
+    };
+  }
+
+  const cardNumberOnly = normalized.match(new RegExp(`^${cardNumberPattern}\\b`, "i"));
+  if (cardNumberOnly?.[1]) {
+    return {
+      cardNumber: cardNumberOnly[1],
+      quantity: 1,
+    };
+  }
+
+  return null;
+}
+
 function toUserProfile(user: SupabaseUser): UserProfile {
   return {
     email: user.email ?? "",
@@ -776,6 +946,10 @@ function getStringMetadata(value: unknown) {
 
 function unique(values: string[]) {
   return Array.from(new Set(values.filter(Boolean)));
+}
+
+function normalizeCardNumber(cardNumber: string) {
+  return cardNumber.trim().toUpperCase();
 }
 
 function readStorage<T>(key: string, fallback: T): T {
