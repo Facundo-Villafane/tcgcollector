@@ -611,7 +611,7 @@ function NavButton({ icon, label, active, onClick }: { icon: React.ReactNode; la
 
 function Metric({ label, value, detail }: { label: string; value: string; detail: string }) {
   return (
-    <div className="overflow-hidden rounded-md border border-[#d9ded6] bg-white shadow-sm">
+    <div className="rounded-md border border-[#d9ded6] bg-white p-4 shadow-sm">
       <p className="text-sm text-[#60706d]">{label}</p>
       <p className="mt-2 text-3xl font-bold">{value}</p>
       <p className="text-sm text-[#60706d]">{detail}</p>
@@ -759,7 +759,7 @@ function DeckEditorHeader({
   onDelete: () => void;
 }) {
   return (
-    <div className="rounded-md border border-[#d9ded6] bg-white p-4 shadow-sm">
+    <div className="overflow-hidden rounded-md border border-[#d9ded6] bg-white shadow-sm">
       <div
         className="min-h-44 p-4 text-white"
         style={{
