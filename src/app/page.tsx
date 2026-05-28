@@ -27,7 +27,7 @@ const STORAGE_KEYS = {
   decks: "tamer-binder:decks",
 };
 
-const maxDeckQuantity = 12;
+const maxDeckQuantity = 4;
 const quantityOptions = Array.from({ length: maxDeckQuantity + 1 }, (_value, index) => index);
 
 type DeckImportResult = {
@@ -235,8 +235,7 @@ export default function Home() {
           const quantities = new Map(deck.cards.map((deckCard) => [deckCard.cardId, deckCard.quantityRequired]));
 
           for (const deckCard of parsed.cards) {
-            const currentQuantity = quantities.get(deckCard.cardId) ?? 0;
-            quantities.set(deckCard.cardId, Math.min(currentQuantity + deckCard.quantityRequired, maxDeckQuantity));
+            quantities.set(deckCard.cardId, deckCard.quantityRequired);
           }
 
           return {
@@ -726,7 +725,7 @@ function DeckImportPanel({ onImport, disabled }: { onImport: (text: string) => D
         placeholder={"4 BT1-010 Agumon\n4 BT1-015 Greymon\n2 BT1-084 Tai Kamiya"}
       />
       <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <p className="text-sm text-[#60706d]">También acepta formatos como BT1-010 x4 o 4x BT1-010.</p>
+        <p className="text-sm text-[#60706d]">Formato: cantidad, nombre opcional y número. Cada carta se declara una vez.</p>
         <button
           className="flex items-center justify-center gap-2 rounded-md bg-[#127d84] px-4 py-2 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
           disabled={disabled || text.trim().length === 0}
@@ -863,9 +862,10 @@ function getDeckStats(deck: Deck, collection: CollectionMap) {
 }
 
 function parseDeckList(text: string, cardsByNumber: Map<string, DigimonCard>) {
-  const cards: Deck["cards"] = [];
+  const cardsById = new Map<string, Deck["cards"][number]>();
   const notFound: string[] = [];
   const ignored: string[] = [];
+  const duplicateCards: string[] = [];
 
   for (const rawLine of text.split(/\r?\n/)) {
     const line = rawLine.trim();
@@ -883,13 +883,20 @@ function parseDeckList(text: string, cardsByNumber: Map<string, DigimonCard>) {
       continue;
     }
 
-    cards.push({
+    if (cardsById.has(card.id)) {
+      duplicateCards.push(card.cardNumber);
+      continue;
+    }
+
+    cardsById.set(card.id, {
       cardId: card.id,
       quantityRequired: parsedLine.quantity,
     });
   }
 
-  return { cards, notFound: unique(notFound), ignored };
+  const duplicateNotes = unique(duplicateCards).map((cardNumber) => `${cardNumber} duplicada`);
+
+  return { cards: Array.from(cardsById.values()), notFound: unique(notFound), ignored: [...ignored, ...duplicateNotes] };
 }
 
 function parseDeckLine(line: string) {
@@ -897,6 +904,7 @@ function parseDeckLine(line: string) {
   const cardNumberPattern = "([A-Z]{1,4}\\d{0,2}-\\d{2,4})";
   const patterns = [
     new RegExp(`^(\\d{1,2})x?\\s+${cardNumberPattern}\\b`, "i"),
+    new RegExp(`^(\\d{1,2})x?\\s+.*?\\s${cardNumberPattern}\\b`, "i"),
     new RegExp(`^${cardNumberPattern}\\s+x?(\\d{1,2})\\b`, "i"),
     new RegExp(`^${cardNumberPattern}\\b.*?\\sx(\\d{1,2})$`, "i"),
   ];
