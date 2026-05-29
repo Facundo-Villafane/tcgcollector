@@ -529,16 +529,16 @@ export default function Home() {
   }
 
   return (
-    <main className="min-h-screen pb-24">
-      <header className="skeuo-binder sticky top-0 z-20 text-[#fff9ed] backdrop-blur">
+    <main className="min-h-screen pb-32">
+      <header className="skeuo-binder sticky top-0 z-20 text-[#20282b] backdrop-blur">
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-3">
           <button className="flex items-center gap-2 text-left" onClick={() => setView("dashboard")}>
-            <span className="binder-stitch grid h-10 w-10 place-items-center rounded-md bg-[#f4c430] text-[#172b28]">
+            <span className="binder-stitch grid h-10 w-10 place-items-center rounded-md bg-[#e8edf0] text-[#127d84]">
               <Archive size={22} />
             </span>
             <span>
               <span className="block text-lg font-bold leading-tight">Tamer Binder</span>
-              <span className="block text-xs text-[#d7c9ae]">
+              <span className="block text-xs text-[#60706d]">
                 {user ? `${user.displayName} · ${saveStatus}` : "Explorá decks públicos"}
               </span>
             </span>
@@ -557,12 +557,6 @@ export default function Home() {
             </button>
           )}
         </div>
-        <nav className="no-scrollbar mx-auto flex max-w-6xl gap-2 overflow-x-auto px-4 pb-3">
-          <NavButton icon={<ShieldCheck size={17} />} label="Inicio" active={view === "dashboard"} onClick={() => setView("dashboard")} />
-          <NavButton icon={<Search size={17} />} label="Cartas" active={view === "catalog"} onClick={() => setView("catalog")} />
-          <NavButton icon={<Library size={17} />} label="Colección" active={view === "collection"} onClick={() => user ? setView("collection") : handleGoogleLogin()} />
-          <NavButton icon={<BookOpen size={17} />} label="Decks" active={view === "decks"} onClick={() => user ? setView("decks") : handleGoogleLogin()} />
-        </nav>
       </header>
 
       <div className="mx-auto max-w-6xl px-4 py-6">
@@ -844,6 +838,14 @@ export default function Home() {
         )}
       </div>
 
+      <BottomNavigation
+        view={view}
+        onDashboard={() => setView("dashboard")}
+        onCatalog={() => setView("catalog")}
+        onCollection={() => user ? setView("collection") : handleGoogleLogin()}
+        onDecks={() => user ? setView("decks") : handleGoogleLogin()}
+      />
+
       {selectedCard && (
         <CardDetail
           card={selectedCard}
@@ -871,16 +873,42 @@ function EmptyPage({ title, detail }: { title: string; detail: string }) {
   );
 }
 
-function NavButton({ icon, label, active, onClick }: { icon: React.ReactNode; label: string; active: boolean; onClick: () => void }) {
+function BottomNavigation({
+  view,
+  onDashboard,
+  onCatalog,
+  onCollection,
+  onDecks,
+}: {
+  view: View;
+  onDashboard: () => void;
+  onCatalog: () => void;
+  onCollection: () => void;
+  onDecks: () => void;
+}) {
+  return (
+    <nav className="fixed inset-x-0 bottom-0 z-20 px-3 pb-3 sm:px-4">
+      <div className="skeuo-shell mx-auto grid max-w-md grid-cols-4 gap-2 rounded-md p-2">
+        <BottomNavItem icon={<ShieldCheck size={20} />} label="Inicio" active={view === "dashboard"} onClick={onDashboard} />
+        <BottomNavItem icon={<Search size={20} />} label="Cartas" active={view === "catalog"} onClick={onCatalog} />
+        <BottomNavItem icon={<Library size={20} />} label="Colección" active={view === "collection"} onClick={onCollection} />
+        <BottomNavItem icon={<BookOpen size={20} />} label="Decks" active={view === "decks"} onClick={onDecks} />
+      </div>
+    </nav>
+  );
+}
+
+function BottomNavItem({ icon, label, active, onClick }: { icon: React.ReactNode; label: string; active: boolean; onClick: () => void }) {
   return (
     <button
-      className={`flex min-w-fit items-center gap-2 rounded-md px-3 py-2 text-sm font-semibold ${
-        active ? "skeuo-primary text-white" : "skeuo-button text-[#1b2424]"
+      className={`flex min-w-0 flex-col items-center justify-center gap-1 rounded-md px-2 py-2 text-[11px] font-bold leading-tight ${
+        active ? "skeuo-primary text-white" : "text-[#60706d]"
       }`}
       onClick={onClick}
+      aria-current={active ? "page" : undefined}
     >
-      {icon}
-      {label}
+      <span className={active ? "text-white" : "text-[#127d84]"}>{icon}</span>
+      <span className="truncate">{label}</span>
     </button>
   );
 }
@@ -1142,7 +1170,7 @@ function DeckEditorHeader({
             placeholder="Notas, plan de juego o idea principal del deck..."
           />
         ) : (
-          <p className="mt-2 min-h-12 rounded-md border border-[#d9ded6] bg-[#fff4df] px-3 py-2 text-sm leading-6 text-[#1b2424] shadow-inner">
+          <p className="mt-2 min-h-12 rounded-md border border-[#d2dde1] bg-[#dfe7ea] px-3 py-2 text-sm leading-6 text-[#1b2424] shadow-inner">
             {deck.description || "Sin descripción."}
           </p>
         )}
@@ -1197,7 +1225,7 @@ function DeckImportPanel({ onImport, disabled }: { onImport: (text: string) => D
         </button>
       </div>
       {result && (
-        <div className="mt-3 rounded-md bg-[#fff4df] p-3 text-sm shadow-inner">
+        <div className="mt-3 rounded-md bg-[#dfe7ea] p-3 text-sm shadow-inner">
           <p className="font-semibold">
             {result.importedLines} líneas importadas · {result.importedCopies} copias agregadas
           </p>
@@ -1372,7 +1400,7 @@ function CompactDeckRow({
   const missing = Math.max(item.quantityRequired - owned, 0);
 
   return (
-    <div className="grid grid-cols-[24px_minmax(0,1fr)_auto_auto] items-center gap-2 rounded px-1 py-1 text-sm hover:bg-[#fff4df]">
+    <div className="grid grid-cols-[24px_minmax(0,1fr)_auto_auto] items-center gap-2 rounded px-1 py-1 text-sm hover:bg-[#dfe7ea]">
       <span className="font-semibold text-[#1d5fa8]">{item.quantityRequired}</span>
       <button className="truncate text-left font-semibold" onClick={onOpen}>
         {item.card.name}
@@ -1459,7 +1487,7 @@ function CardDetail({
               </div>
             </div>
             {card.effect && (
-              <p className="rounded-md bg-[#fff4df] p-3 text-sm leading-7 shadow-inner">
+              <p className="rounded-md bg-[#dfe7ea] p-3 text-sm leading-7 shadow-inner">
                 <HighlightedEffectText text={card.effect} />
               </p>
             )}

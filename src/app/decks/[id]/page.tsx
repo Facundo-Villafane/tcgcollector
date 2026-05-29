@@ -64,15 +64,15 @@ export default async function PublicDeckPage({ params }: PageProps) {
 
   return (
     <main className="min-h-screen pb-10 text-[#1b2424]">
-      <header className="skeuo-binder text-[#fff9ed]">
+      <header className="skeuo-binder text-[#20282b]">
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-3">
           <Link className="flex items-center gap-2" href="/">
-            <span className="binder-stitch grid h-10 w-10 place-items-center rounded-md bg-[#f4c430] text-[#172b28]">
+            <span className="binder-stitch grid h-10 w-10 place-items-center rounded-md bg-[#e8edf0] text-[#127d84]">
               <Archive size={22} />
             </span>
             <span>
               <span className="block text-lg font-bold leading-tight">Tamer Binder</span>
-              <span className="block text-xs text-[#d7c9ae]">Decks públicos y colección</span>
+              <span className="block text-xs text-[#60706d]">Decks públicos y colección</span>
             </span>
           </Link>
           <Link className="skeuo-button rounded-md px-3 py-2 text-sm font-semibold text-[#1b2424]" href={user ? "/?view=decks" : "/"}>
