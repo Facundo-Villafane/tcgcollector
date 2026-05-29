@@ -77,6 +77,7 @@ export default function Home() {
   const [user, setUser] = useState<UserProfile | null>(null);
   const [view, setView] = useState<View>("dashboard");
   const [query, setQuery] = useState("");
+  const [collectionQuery, setCollectionQuery] = useState("");
   const [color, setColor] = useState("All");
   const [type, setType] = useState("All");
   const [setCode, setSetCode] = useState("All");
@@ -192,7 +193,8 @@ export default function Home() {
   );
 
   const filteredCards = useMemo(() => {
-    const normalizedQuery = query.trim().toLowerCase();
+    const activeQuery = view === "collection" ? collectionQuery : query;
+    const normalizedQuery = activeQuery.trim().toLowerCase();
 
     const result = cards.filter((card) => {
       const matchesQuery =
@@ -209,7 +211,7 @@ export default function Home() {
     });
 
     return view === "catalog" ? result.slice(0, 80) : result;
-  }, [cards, color, query, setCode, type, view]);
+  }, [cards, color, collectionQuery, query, setCode, type, view]);
 
   const colors = useMemo(() => unique(cards.flatMap((card) => card.color)).sort(), [cards]);
   const types = useMemo(() => unique(cards.map((card) => card.type)).sort(), [cards]);
@@ -613,8 +615,8 @@ export default function Home() {
                 </p>
               </div>
               <Filters
-                query={query}
-                setQuery={setQuery}
+                query={view === "collection" ? collectionQuery : query}
+                setQuery={view === "collection" ? setCollectionQuery : setQuery}
                 color={color}
                 setColor={setColor}
                 type={type}
@@ -1150,15 +1152,28 @@ function CollectionScanner({
       const cropHeight = Math.floor(sourceHeight * 0.46);
       canvas.width = sourceWidth;
       canvas.height = cropHeight;
-      context.filter = "contrast(1.55) grayscale(1)";
-      context.drawImage(video, 0, cropY, sourceWidth, cropHeight, 0, 0, sourceWidth, cropHeight);
 
       const { recognize } = await import("tesseract.js");
-      const result = await recognize(canvas, "eng");
-      const text = result.data.text;
-      setDetectedText(text.trim());
 
-      const cardNumber = extractCardNumber(text);
+      const filterPasses = [
+        "contrast(1.55) grayscale(1)",
+        "brightness(0.6) contrast(2.5) grayscale(1)",
+        "invert(1) contrast(1.8) grayscale(1)",
+      ];
+
+      let cardNumber = "";
+      let lastText = "";
+      for (const filter of filterPasses) {
+        context.filter = filter;
+        context.drawImage(video, 0, cropY, sourceWidth, cropHeight, 0, 0, sourceWidth, cropHeight);
+        const result = await recognize(canvas, "eng");
+        lastText = result.data.text;
+        cardNumber = extractCardNumber(lastText);
+        if (cardNumber) break;
+      }
+
+      setDetectedText(lastText.trim());
+
       if (!cardNumber) {
         setScanStatus("No pude leer el número. Acercá la carta, evitá reflejos o escribilo manualmente.");
         return;
