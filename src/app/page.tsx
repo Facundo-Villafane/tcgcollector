@@ -92,7 +92,7 @@ export default function Home() {
       const savedDecks = readStorage<Deck[]>(STORAGE_KEYS.decks, []);
       setCollection(savedCollection);
       setDecks(savedDecks);
-      setActiveDeckId(savedDecks[0]?.id ?? "");
+      setActiveDeckId("");
     });
   }, []);
 
@@ -209,7 +209,7 @@ export default function Home() {
   const colors = useMemo(() => unique(cards.flatMap((card) => card.color)).sort(), [cards]);
   const types = useMemo(() => unique(cards.map((card) => card.type)).sort(), [cards]);
   const sets = useMemo(() => unique(cards.map((card) => card.setCode)).sort(), [cards]);
-  const activeDeck = decks.find((deck) => deck.id === activeDeckId) ?? decks[0];
+  const activeDeck = decks.find((deck) => deck.id === activeDeckId);
   const ownedByCardNumber = useMemo(() => getOwnedByCardNumber(collection, cardsById), [collection, cardsById]);
   const deckStats = useMemo(
     () => decks.map((deck) => getDeckStats(deck, ownedByCardNumber, cardsByNumber)),
@@ -275,7 +275,7 @@ export default function Home() {
 
     setCollection(remoteCollection);
     setDecks(remoteDecks);
-    setActiveDeckId(remoteDecks[0]?.id ?? "");
+    setActiveDeckId("");
     setHasLoadedRemoteData(true);
     setSaveStatus("Sincronizado");
   }
@@ -512,7 +512,7 @@ export default function Home() {
   function deleteDeck(deckId: string) {
     setDecks((current) => current.filter((deck) => deck.id !== deckId));
     if (activeDeckId === deckId) {
-      setActiveDeckId(decks.find((deck) => deck.id !== deckId)?.id ?? "");
+      setActiveDeckId("");
     }
   }
 
@@ -576,7 +576,14 @@ export default function Home() {
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
               <ActionButton icon={<Search size={20} />} label="Buscar cartas" onClick={() => setView("catalog")} />
               <ActionButton icon={<Library size={20} />} label="Mi colección" onClick={() => user ? setView("collection") : handleGoogleLogin()} />
-              <ActionButton icon={<BookOpen size={20} />} label="Mis decks" onClick={() => user ? setView("decks") : handleGoogleLogin()} />
+              <ActionButton icon={<BookOpen size={20} />} label="Mis decks" onClick={() => {
+                if (!user) {
+                  handleGoogleLogin();
+                  return;
+                }
+                setActiveDeckId("");
+                setView("decks");
+              }} />
               {!user && <ActionButton icon={<UserIcon size={20} />} label="Entrar" onClick={handleGoogleLogin} />}
             </div>
 
@@ -679,10 +686,11 @@ export default function Home() {
                 {decks.length === 0 && <EmptyState title="Sin decks" detail="Creá tu primer deck para comparar con tu colección." />}
                 {decks.map((deck) => {
                   const stats = getDeckStats(deck, ownedByCardNumber, cardsByNumber);
+                  const cover = getDeckCoverCard(deck, splitDeckCards(deck, cardsByNumber).all, cardsByNumber);
                   return (
                     <button
                       key={deck.id}
-                      className={`w-full rounded-md border p-3 text-left shadow-sm ${
+                      className={`grid w-full grid-cols-[64px_1fr] gap-3 rounded-md border p-2 text-left shadow-sm ${
                         activeDeck?.id === deck.id ? "border-[#127d84] bg-[#e9f5f3]" : "border-[#d9ded6] bg-white"
                       }`}
                       onClick={() => {
@@ -690,9 +698,21 @@ export default function Home() {
                         setDeckMode("view");
                       }}
                     >
-                      <span className="block font-semibold">{deck.name}</span>
-                      <span className="mt-1 block text-sm text-[#60706d]">
-                        {stats.totalCards} cartas · {stats.missingCopies === 0 ? "Completo" : `${stats.missingCopies} copias faltantes`}
+                      <span
+                        className="block h-20 rounded bg-[#1b2424]"
+                        style={{
+                          backgroundImage: cover
+                            ? `linear-gradient(180deg, rgba(20,28,32,0.08), rgba(20,28,32,0.7)), url(${cover.imageUrl})`
+                            : "linear-gradient(135deg, #127d84, #1b2424)",
+                          backgroundPosition: "center",
+                          backgroundSize: "cover",
+                        }}
+                      />
+                      <span className="min-w-0 self-center">
+                        <span className="block truncate font-semibold">{deck.name}</span>
+                        <span className="mt-1 block text-sm text-[#60706d]">
+                          {stats.totalCards} cartas · {stats.missingCopies === 0 ? "Completo" : `${stats.missingCopies} copias faltantes`}
+                        </span>
                       </span>
                     </button>
                   );
@@ -831,7 +851,15 @@ export default function Home() {
                   </div>
                 </>
               ) : (
-                <EmptyState title="Elegí o creá un deck" detail="Después podés agregar cartas y ver faltantes al instante." />
+                <DeckLibrary
+                  decks={decks}
+                  stats={deckStats}
+                  cardsByNumber={cardsByNumber}
+                  onOpen={(deckId) => {
+                    setActiveDeckId(deckId);
+                    setDeckMode("view");
+                  }}
+                />
               )}
             </div>
           </section>
@@ -843,7 +871,14 @@ export default function Home() {
         onDashboard={() => setView("dashboard")}
         onCatalog={() => setView("catalog")}
         onCollection={() => user ? setView("collection") : handleGoogleLogin()}
-        onDecks={() => user ? setView("decks") : handleGoogleLogin()}
+        onDecks={() => {
+          if (!user) {
+            handleGoogleLogin();
+            return;
+          }
+          setActiveDeckId("");
+          setView("decks");
+        }}
       />
 
       {selectedCard && (
@@ -1083,6 +1118,61 @@ function DeckSummary({ decks, stats, onOpen }: { decks: Deck[]; stats: ReturnTyp
             </span>
           </button>
         ))}
+      </div>
+    </div>
+  );
+}
+
+function DeckLibrary({
+  decks,
+  stats,
+  cardsByNumber,
+  onOpen,
+}: {
+  decks: Deck[];
+  stats: ReturnType<typeof getDeckStats>[];
+  cardsByNumber: Map<string, DigimonCard>;
+  onOpen: (deckId: string) => void;
+}) {
+  if (decks.length === 0) {
+    return <EmptyState title="Sin decks" detail="Creá tu primer deck para ver la biblioteca acá." />;
+  }
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <h2 className="text-2xl font-bold">Tus decks</h2>
+        <p className="text-sm text-[#60706d]">Elegí una lista para abrirla completa o editarla.</p>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        {decks.map((deck, index) => {
+          const deckCards = splitDeckCards(deck, cardsByNumber);
+          const cover = getDeckCoverCard(deck, deckCards.all, cardsByNumber);
+          const deckStats = stats[index];
+
+          return (
+            <button
+              key={deck.id}
+              className="card-sleeve relative min-h-48 overflow-hidden rounded-md bg-[#1b2424] p-4 text-left text-white"
+              onClick={() => onOpen(deck.id)}
+              style={{
+                backgroundImage: cover
+                  ? `linear-gradient(180deg, rgba(20,28,32,0.16), rgba(20,28,32,0.9)), url(${cover.imageUrl})`
+                  : "linear-gradient(135deg, #127d84, #1b2424)",
+                backgroundPosition: "center",
+                backgroundSize: "cover",
+              }}
+            >
+              <span className="rounded bg-black/55 px-2 py-1 text-xs font-bold shadow-sm">{deck.isPublic === false ? "Privado" : "Público"}</span>
+              <span className="absolute bottom-4 left-4 right-4">
+                <span className="block truncate text-xl font-bold">{deck.name}</span>
+                <span className="mt-1 block text-sm text-white/82">
+                  {deckStats.totalCards} cartas · {deckStats.missingCopies === 0 ? "Completo" : `${deckStats.missingCopies} copias faltantes`}
+                </span>
+              </span>
+            </button>
+          );
+        })}
       </div>
     </div>
   );
