@@ -4,6 +4,8 @@ import {
   Archive,
   BookOpen,
   Camera,
+  Zap,
+  ZapOff,
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
@@ -1037,6 +1039,8 @@ function CollectionScanner({
   const [manualNumber, setManualNumber] = useState("");
   const [isCameraOpen, setIsCameraOpen] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
+  const [isTorchOn, setIsTorchOn] = useState(false);
+  const [isTorchSupported, setIsTorchSupported] = useState(false);
   const [scanStatus, setScanStatus] = useState("");
   const [detectedText, setDetectedText] = useState("");
 
@@ -1048,6 +1052,9 @@ function CollectionScanner({
     if (isCameraOpen && videoRef.current && streamRef.current) {
       videoRef.current.srcObject = streamRef.current;
       videoRef.current.play().catch(() => undefined);
+      const track = streamRef.current.getVideoTracks()[0];
+      const caps = track?.getCapabilities?.() as MediaTrackCapabilities & { torch?: boolean };
+      setIsTorchSupported(!!caps?.torch);
     }
   }, [isCameraOpen]);
 
@@ -1103,6 +1110,20 @@ function CollectionScanner({
     }
     setIsCameraOpen(false);
     setIsScanning(false);
+    setIsTorchOn(false);
+    setIsTorchSupported(false);
+  }
+
+  async function toggleTorch() {
+    const track = streamRef.current?.getVideoTracks()[0];
+    if (!track) return;
+    const next = !isTorchOn;
+    try {
+      await track.applyConstraints({ advanced: [{ torch: next } as MediaTrackConstraintSet] });
+      setIsTorchOn(next);
+    } catch {
+      // torch applyConstraints failed silently
+    }
   }
 
   async function scanFrame() {
@@ -1209,6 +1230,15 @@ function CollectionScanner({
             <div className="relative mt-4 overflow-hidden rounded-md bg-black">
               <video ref={videoRef} className="aspect-[3/4] w-full object-cover" muted playsInline autoPlay />
               <div className="pointer-events-none absolute inset-x-5 bottom-8 h-24 rounded border-2 border-[#f4c430] shadow-[0_0_0_999px_rgba(0,0,0,0.22)]" />
+              {isTorchSupported && (
+                <button
+                  className={`absolute right-3 top-3 grid h-10 w-10 place-items-center rounded-full shadow-lg transition-colors ${isTorchOn ? "bg-[#f4c430] text-black" : "bg-black/50 text-white"}`}
+                  onClick={toggleTorch}
+                  title={isTorchOn ? "Apagar flash" : "Encender flash"}
+                >
+                  {isTorchOn ? <ZapOff size={18} /> : <Zap size={18} />}
+                </button>
+              )}
             </div>
 
             <canvas ref={canvasRef} className="hidden" />
