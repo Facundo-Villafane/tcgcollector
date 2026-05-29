@@ -1044,6 +1044,13 @@ function CollectionScanner({
     return () => stopCamera();
   }, []);
 
+  useEffect(() => {
+    if (isCameraOpen && videoRef.current && streamRef.current) {
+      videoRef.current.srcObject = streamRef.current;
+      videoRef.current.play().catch(() => undefined);
+    }
+  }, [isCameraOpen]);
+
   function addByNumber(rawValue: string) {
     const cardNumber = extractCardNumber(rawValue);
     if (!cardNumber) {
@@ -1083,13 +1090,6 @@ function CollectionScanner({
 
       streamRef.current = stream;
       setIsCameraOpen(true);
-
-      window.setTimeout(() => {
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          videoRef.current.play().catch(() => undefined);
-        }
-      }, 0);
     } catch {
       setScanStatus("No pude abrir la cámara. Revisá permisos del navegador.");
     }
