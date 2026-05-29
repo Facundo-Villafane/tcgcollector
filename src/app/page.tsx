@@ -3,6 +3,7 @@
 import {
   Archive,
   BookOpen,
+  Camera,
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
@@ -15,13 +16,15 @@ import {
   Minus,
   Pencil,
   Plus,
+  ScanLine,
   Search,
   Share2,
   ShieldCheck,
   Trash2,
   User as UserIcon,
+  X,
 } from "lucide-react";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import type { User as SupabaseUser } from "@supabase/supabase-js";
 import type { CollectionMap, Deck, DigimonCard, UserProfile } from "@/lib/types";
 import { createClient } from "@/utils/supabase/client";
@@ -419,6 +422,10 @@ export default function Home() {
     });
   }
 
+  function addCardCopy(card: DigimonCard) {
+    setOwnedQuantity(card.id, (collection[card.id] ?? 0) + 1);
+  }
+
   function createDeck(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!user) return;
@@ -617,6 +624,12 @@ export default function Home() {
                 sets={sets}
               />
             </div>
+
+            <CollectionScanner
+              cardsByNumber={cardsByNumber}
+              onAddCard={addCardCopy}
+              disabled={cards.length === 0}
+            />
 
             {isLoading && <EmptyState title="Cargando catálogo" detail="La primera carga puede tardar un momento." />}
             {error && <EmptyState title="No se pudo cargar" detail={error} />}
@@ -1005,6 +1018,220 @@ function LatestDecks({ decks, cardsByNumber }: { decks: Deck[]; cardsByNumber: M
           );
         })}
       </div>
+    </section>
+  );
+}
+
+function CollectionScanner({
+  cardsByNumber,
+  onAddCard,
+  disabled,
+}: {
+  cardsByNumber: Map<string, DigimonCard>;
+  onAddCard: (card: DigimonCard) => void;
+  disabled: boolean;
+}) {
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const [manualNumber, setManualNumber] = useState("");
+  const [isCameraOpen, setIsCameraOpen] = useState(false);
+  const [isScanning, setIsScanning] = useState(false);
+  const [scanStatus, setScanStatus] = useState("");
+  const [detectedText, setDetectedText] = useState("");
+
+  useEffect(() => {
+    return () => stopCamera();
+  }, []);
+
+  function addByNumber(rawValue: string) {
+    const cardNumber = extractCardNumber(rawValue);
+    if (!cardNumber) {
+      setScanStatus("No encontré un número válido. Probá EX7-004, BT1-010 o P-038.");
+      return;
+    }
+
+    const card = cardsByNumber.get(normalizeCardNumber(cardNumber));
+    if (!card) {
+      setScanStatus(`No encontré ${cardNumber} en el catálogo.`);
+      return;
+    }
+
+    onAddCard(card);
+    setManualNumber("");
+    setScanStatus(`${card.name} ${card.cardNumber} +1 a tu colección.`);
+  }
+
+  async function openCamera() {
+    setScanStatus("");
+    setDetectedText("");
+
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setScanStatus("Este navegador no permite abrir la cámara desde la web.");
+      return;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: false,
+        video: {
+          facingMode: { ideal: "environment" },
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+        },
+      });
+
+      streamRef.current = stream;
+      setIsCameraOpen(true);
+
+      window.setTimeout(() => {
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          videoRef.current.play().catch(() => undefined);
+        }
+      }, 0);
+    } catch {
+      setScanStatus("No pude abrir la cámara. Revisá permisos del navegador.");
+    }
+  }
+
+  function stopCamera() {
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+    streamRef.current = null;
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
+    setIsCameraOpen(false);
+    setIsScanning(false);
+  }
+
+  async function scanFrame() {
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    if (!video || !canvas || video.videoWidth === 0 || video.videoHeight === 0) {
+      setScanStatus("La cámara todavía está iniciando. Probá de nuevo en un segundo.");
+      return;
+    }
+
+    setIsScanning(true);
+    setScanStatus("Leyendo número de carta...");
+    setDetectedText("");
+
+    try {
+      const context = canvas.getContext("2d");
+      if (!context) throw new Error("Canvas no disponible.");
+
+      const sourceWidth = video.videoWidth;
+      const sourceHeight = video.videoHeight;
+      const cropY = Math.floor(sourceHeight * 0.52);
+      const cropHeight = Math.floor(sourceHeight * 0.46);
+      canvas.width = sourceWidth;
+      canvas.height = cropHeight;
+      context.filter = "contrast(1.55) grayscale(1)";
+      context.drawImage(video, 0, cropY, sourceWidth, cropHeight, 0, 0, sourceWidth, cropHeight);
+
+      const { recognize } = await import("tesseract.js");
+      const result = await recognize(canvas, "eng");
+      const text = result.data.text;
+      setDetectedText(text.trim());
+
+      const cardNumber = extractCardNumber(text);
+      if (!cardNumber) {
+        setScanStatus("No pude leer el número. Acercá la carta, evitá reflejos o escribilo manualmente.");
+        return;
+      }
+
+      const card = cardsByNumber.get(normalizeCardNumber(cardNumber));
+      if (!card) {
+        setScanStatus(`Leí ${cardNumber}, pero no está en el catálogo.`);
+        return;
+      }
+
+      onAddCard(card);
+      setScanStatus(`${card.name} ${card.cardNumber} +1 a tu colección.`);
+    } catch {
+      setScanStatus("Falló el OCR local. Podés sumar la carta escribiendo el número.");
+    } finally {
+      setIsScanning(false);
+    }
+  }
+
+  return (
+    <section className="skeuo-card space-y-3 rounded-md p-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h2 className="flex items-center gap-2 font-bold">
+            <ScanLine size={18} />
+            Agregar rápido
+          </h2>
+          <p className="mt-1 text-sm text-[#60706d]">Escaneá o escribí el número de carta para sumar una copia.</p>
+        </div>
+        <button className="skeuo-primary flex items-center justify-center gap-2 rounded-md px-4 py-2 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60" disabled={disabled} onClick={openCamera}>
+          <Camera size={17} />
+          Escanear
+        </button>
+      </div>
+
+      <form
+        className="flex flex-col gap-2 sm:flex-row"
+        onSubmit={(event) => {
+          event.preventDefault();
+          addByNumber(manualNumber);
+        }}
+      >
+        <input
+          className="min-w-0 flex-1 rounded-md border border-[#c9d2cd] bg-[#e8edf0] px-3 py-2 uppercase outline-none shadow-inner focus:border-[#127d84]"
+          value={manualNumber}
+          onChange={(event) => setManualNumber(event.target.value)}
+          placeholder="EX7-004, BT1-010, P-038..."
+          disabled={disabled}
+        />
+        <button className="skeuo-button rounded-md px-4 py-2 font-semibold disabled:cursor-not-allowed disabled:opacity-60" disabled={disabled || manualNumber.trim().length === 0}>
+          +1 copia
+        </button>
+      </form>
+
+      {scanStatus && <p className="rounded-md bg-[#dfe7ea] px-3 py-2 text-sm font-semibold text-[#1b2424] shadow-inner">{scanStatus}</p>}
+
+      {isCameraOpen && (
+        <div className="fixed inset-0 z-40 grid place-items-end bg-black/70 p-0 sm:place-items-center sm:p-4">
+          <section className="skeuo-card max-h-[94vh] w-full max-w-xl overflow-y-auto rounded-t-md p-4 sm:rounded-md">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2 className="text-xl font-bold">Scanner de carta</h2>
+                <p className="mt-1 text-sm text-[#60706d]">Alineá la parte inferior de la carta y evitá reflejos en sleeves.</p>
+              </div>
+              <button className="skeuo-button grid h-10 w-10 place-items-center rounded-md" onClick={stopCamera} title="Cerrar scanner">
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="relative mt-4 overflow-hidden rounded-md bg-black">
+              <video ref={videoRef} className="aspect-[3/4] w-full object-cover" muted playsInline autoPlay />
+              <div className="pointer-events-none absolute inset-x-5 bottom-8 h-24 rounded border-2 border-[#f4c430] shadow-[0_0_0_999px_rgba(0,0,0,0.22)]" />
+            </div>
+
+            <canvas ref={canvasRef} className="hidden" />
+
+            <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+              <button className="skeuo-primary flex flex-1 items-center justify-center gap-2 rounded-md px-4 py-3 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60" disabled={isScanning} onClick={scanFrame}>
+                <ScanLine size={17} />
+                {isScanning ? "Leyendo..." : "Leer número"}
+              </button>
+              <button className="skeuo-button rounded-md px-4 py-3 font-semibold" onClick={stopCamera}>
+                Cerrar
+              </button>
+            </div>
+
+            {detectedText && (
+              <details className="mt-3 text-sm text-[#60706d]">
+                <summary className="cursor-pointer font-semibold">Texto detectado</summary>
+                <pre className="mt-2 whitespace-pre-wrap rounded-md bg-[#dfe7ea] p-3 text-xs shadow-inner">{detectedText}</pre>
+              </details>
+            )}
+          </section>
+        </div>
+      )}
     </section>
   );
 }
@@ -1881,6 +2108,25 @@ function unique(values: string[]) {
 
 function normalizeCardNumber(cardNumber: string) {
   return cardNumber.trim().toUpperCase().replace(/_P\d+$/, "");
+}
+
+function extractCardNumber(text: string) {
+  const normalizedText = text
+    .toUpperCase()
+    .replace(/[|]/g, "I")
+    .replace(/\s+/g, " ");
+
+  const match = normalizedText.match(/\b((?:P|LM)\s*-?\s*\d{2,3}|[A-Z]{2,3}\s*-?\s*\d{1,2}\s*-?\s*\d{2,3})\b/);
+  if (!match?.[1]) return "";
+
+  const compact = match[1].replace(/\s+/g, "").replace(/--+/g, "-");
+  const promoMatch = compact.match(/^(P|LM)-?(\d{2,3})$/);
+  if (promoMatch) return `${promoMatch[1]}-${promoMatch[2]}`;
+
+  const standardMatch = compact.match(/^([A-Z]{2})-?(\d{1,2})-?(\d{2,3})$/);
+  if (!standardMatch) return compact;
+
+  return `${standardMatch[1]}${Number(standardMatch[2])}-${standardMatch[3]}`;
 }
 
 function readStorage<T>(key: string, fallback: T): T {

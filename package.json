@@ -15,7 +15,8 @@
     "lucide-react": "latest",
     "next": "latest",
     "react": "latest",
-    "react-dom": "latest"
+    "react-dom": "latest",
+    "tesseract.js": "^7.0.0"
   },
   "devDependencies": {
     "@eslint/eslintrc": "latest",
