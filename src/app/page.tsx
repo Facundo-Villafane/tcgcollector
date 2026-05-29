@@ -77,6 +77,7 @@ export default function Home() {
   const [setCode, setSetCode] = useState("All");
   const [collection, setCollection] = useState<CollectionMap>({});
   const [decks, setDecks] = useState<Deck[]>([]);
+  const [publicDecks, setPublicDecks] = useState<Deck[]>([]);
   const [activeDeckId, setActiveDeckId] = useState("");
   const [deckMode, setDeckMode] = useState<DeckMode>("view");
   const [isCreatingDeck, setIsCreatingDeck] = useState(false);
@@ -139,11 +140,43 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    async function loadPublicDecks() {
+      const { data } = await supabase
+        .from("decks")
+        .select("id,user_id,name,description,cover_card_number,is_public,view_count,created_at,updated_at,deck_cards(card_number,quantity_required)")
+        .eq("is_public", true)
+        .order("updated_at", { ascending: false })
+        .limit(8);
+
+      setPublicDecks(((data ?? []) as DeckRow[]).map(fromDeckRow));
+    }
+
+    loadPublicDecks();
+  }, [supabase]);
+
+  useEffect(() => {
     writeStorage(STORAGE_KEYS.collection, collection);
   }, [collection]);
 
   useEffect(() => {
     writeStorage(STORAGE_KEYS.decks, decks);
+  }, [decks]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const requestedView = params.get("view");
+    const requestedDeckId = params.get("deck");
+
+    queueMicrotask(() => {
+      if (requestedView === "decks") {
+        setView("decks");
+      }
+
+      if (requestedDeckId && decks.some((deck) => deck.id === requestedDeckId)) {
+        setActiveDeckId(requestedDeckId);
+        setDeckMode("view");
+      }
+    });
   }, [decks]);
 
   const cardsById = useMemo(() => new Map(cards.map((card) => [card.id, card])), [cards]);
@@ -308,7 +341,7 @@ export default function Home() {
         name: deck.name,
         description: deck.description ?? null,
         cover_card_number: deck.coverCardNumber ?? null,
-        is_public: deck.isPublic ?? false,
+        is_public: deck.isPublic ?? true,
         view_count: deck.viewCount ?? 0,
         created_at: deck.createdAt,
         updated_at: deck.updatedAt,
@@ -398,6 +431,7 @@ export default function Home() {
       id: crypto.randomUUID(),
       userId: user.id,
       name,
+      isPublic: true,
       createdAt: now,
       updatedAt: now,
       cards: [],
@@ -494,67 +528,75 @@ export default function Home() {
     return <EmptyPage title="Cargando sesión" detail="Estamos revisando tu login de Supabase." />;
   }
 
-  if (!user) {
-    return <LoginScreen onGoogleLogin={handleGoogleLogin} error={authError} />;
-  }
-
   return (
     <main className="min-h-screen pb-24">
-      <header className="sticky top-0 z-20 border-b border-[#d9ded6] bg-[#f7f7f2]/95 backdrop-blur">
+      <header className="skeuo-binder sticky top-0 z-20 text-[#fff9ed] backdrop-blur">
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-3">
           <button className="flex items-center gap-2 text-left" onClick={() => setView("dashboard")}>
-            <span className="grid h-10 w-10 place-items-center rounded-md bg-[#127d84] text-white">
+            <span className="binder-stitch grid h-10 w-10 place-items-center rounded-md bg-[#f4c430] text-[#172b28]">
               <Archive size={22} />
             </span>
             <span>
               <span className="block text-lg font-bold leading-tight">Tamer Binder</span>
-              <span className="block text-xs text-[#60706d]">{user.displayName} · {saveStatus}</span>
+              <span className="block text-xs text-[#d7c9ae]">
+                {user ? `${user.displayName} · ${saveStatus}` : "Explorá decks públicos"}
+              </span>
             </span>
           </button>
+          {user ? (
           <button
-            className="grid h-10 w-10 place-items-center rounded-md border border-[#c9d2cd] bg-white text-[#1b2424]"
+            className="skeuo-button grid h-10 w-10 place-items-center rounded-md text-[#1b2424]"
             title="Cerrar sesión"
             onClick={handleLogout}
           >
             <UserIcon size={18} />
           </button>
+          ) : (
+            <button className="skeuo-primary rounded-md px-3 py-2 text-sm font-semibold text-white" onClick={handleGoogleLogin}>
+              Entrar
+            </button>
+          )}
         </div>
         <nav className="no-scrollbar mx-auto flex max-w-6xl gap-2 overflow-x-auto px-4 pb-3">
           <NavButton icon={<ShieldCheck size={17} />} label="Inicio" active={view === "dashboard"} onClick={() => setView("dashboard")} />
           <NavButton icon={<Search size={17} />} label="Cartas" active={view === "catalog"} onClick={() => setView("catalog")} />
-          <NavButton icon={<Library size={17} />} label="Colección" active={view === "collection"} onClick={() => setView("collection")} />
-          <NavButton icon={<BookOpen size={17} />} label="Decks" active={view === "decks"} onClick={() => setView("decks")} />
+          <NavButton icon={<Library size={17} />} label="Colección" active={view === "collection"} onClick={() => user ? setView("collection") : handleGoogleLogin()} />
+          <NavButton icon={<BookOpen size={17} />} label="Decks" active={view === "decks"} onClick={() => user ? setView("decks") : handleGoogleLogin()} />
         </nav>
       </header>
 
       <div className="mx-auto max-w-6xl px-4 py-6">
         {view === "dashboard" && (
-          <section className="space-y-6">
+          <section className="skeuo-shell space-y-6 rounded-md p-4 sm:p-5">
             <div>
               <p className="text-sm font-semibold uppercase tracking-wide text-[#127d84]">Digimon Card Game</p>
-              <h1 className="mt-1 text-3xl font-bold">Colección y decks, en el mismo binder.</h1>
+              <h1 className="mt-1 text-2xl font-bold sm:text-3xl">Colección, decks y comunidad.</h1>
             </div>
 
-            <div className="grid gap-3 sm:grid-cols-3">
+            {user && <div className="grid gap-3 sm:grid-cols-3">
               <Metric label="Cartas registradas" value={collectionCards.length.toString()} detail={`${ownedCopies} copias`} />
               <Metric label="Mis decks" value={decks.length.toString()} detail="listas creadas" />
               <Metric label="Copias faltantes" value={totalMissingCopies.toString()} detail="para completar decks" />
-            </div>
+            </div>}
 
-            <div className="grid gap-3 sm:grid-cols-3">
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
               <ActionButton icon={<Search size={20} />} label="Buscar cartas" onClick={() => setView("catalog")} />
-              <ActionButton icon={<Library size={20} />} label="Ver colección" onClick={() => setView("collection")} />
-              <ActionButton icon={<BookOpen size={20} />} label="Crear deck" onClick={() => setView("decks")} />
+              <ActionButton icon={<Library size={20} />} label="Mi colección" onClick={() => user ? setView("collection") : handleGoogleLogin()} />
+              <ActionButton icon={<BookOpen size={20} />} label="Mis decks" onClick={() => user ? setView("decks") : handleGoogleLogin()} />
+              {!user && <ActionButton icon={<UserIcon size={20} />} label="Entrar" onClick={handleGoogleLogin} />}
             </div>
 
-            <DeckSummary decks={decks} stats={deckStats} onOpen={(id) => { setActiveDeckId(id); setView("decks"); }} />
+            {authError && <p className="text-sm font-semibold text-[#d9534f]">{authError}</p>}
+
+            <LatestDecks decks={publicDecks} cardsByNumber={cardsByNumber} />
+              {user && <DeckSummary decks={decks} stats={deckStats} onOpen={(id) => { setActiveDeckId(id); setView("decks"); }} />}
           </section>
         )}
 
         {(view === "catalog" || view === "collection") && (
-          <section className="space-y-4">
+          <section className="skeuo-shell space-y-4 rounded-md p-4 sm:p-5">
             <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-              <div>
+              <div className="skeuo-shell rounded-md p-4">
                 <h1 className="text-2xl font-bold">{view === "catalog" ? "Buscar cartas" : "Mi colección"}</h1>
                 <p className="text-sm text-[#60706d]">
                   {view === "catalog" ? `${cards.length} cartas del catálogo global` : `${collectionCards.length} cartas con copias registradas`}
@@ -612,7 +654,7 @@ export default function Home() {
                 <p className="text-sm text-[#60706d]">Construí listas y revisá faltantes.</p>
               </div>
               {isCreatingDeck ? (
-                <form className="rounded-md border border-[#d9ded6] bg-white p-3 shadow-sm" onSubmit={createDeck}>
+                <form className="skeuo-card rounded-md p-3" onSubmit={createDeck}>
                   <label className="text-sm font-semibold" htmlFor="deck-name">
                     Nuevo deck
                   </label>
@@ -624,14 +666,14 @@ export default function Home() {
                       onChange={(event) => setNewDeckName(event.target.value)}
                       placeholder="Red Greymon"
                     />
-                    <button className="grid h-10 w-10 place-items-center rounded-md bg-[#127d84] text-white" title="Crear deck">
+                    <button className="skeuo-primary grid h-10 w-10 place-items-center rounded-md text-white" title="Crear deck">
                       <Plus size={18} />
                     </button>
                   </div>
                 </form>
               ) : (
                 <button
-                  className="flex w-full items-center justify-center gap-2 rounded-md border border-[#c9d2cd] bg-white px-3 py-2 font-semibold shadow-sm"
+                  className="skeuo-button flex w-full items-center justify-center gap-2 rounded-md px-3 py-2 font-semibold"
                   onClick={() => setIsCreatingDeck(true)}
                 >
                   <Plus size={17} />
@@ -668,7 +710,7 @@ export default function Home() {
               {activeDeck ? (
                 <>
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="flex rounded-md border border-[#c9d2cd] bg-white p-1 shadow-sm">
+                    <div className="skeuo-card flex rounded-md p-1">
                       <button
                         className={`flex items-center gap-2 rounded px-3 py-2 text-sm font-semibold ${deckMode === "view" ? "bg-[#127d84] text-white" : "text-[#60706d]"}`}
                         onClick={() => setDeckMode("view")}
@@ -821,25 +863,6 @@ export default function Home() {
   );
 }
 
-function LoginScreen({ onGoogleLogin, error }: { onGoogleLogin: () => void; error: string }) {
-  return (
-    <main className="grid min-h-screen place-items-center px-4 py-8">
-      <section className="w-full max-w-md rounded-md border border-[#d9ded6] bg-white p-5 shadow-sm">
-        <div className="grid h-12 w-12 place-items-center rounded-md bg-[#127d84] text-white">
-          <Archive size={26} />
-        </div>
-        <h1 className="mt-5 text-3xl font-bold">Tamer Binder</h1>
-        <p className="mt-2 text-sm text-[#60706d]">Tu colección y tus decks de Digimon TCG en un solo lugar.</p>
-        <button className="mt-6 flex w-full items-center justify-center gap-2 rounded-md bg-[#127d84] px-4 py-3 font-semibold text-white" onClick={onGoogleLogin}>
-          <ShieldCheck size={18} />
-          Continuar con Google
-        </button>
-        {error && <p className="mt-3 rounded-md bg-[#fff1ef] p-3 text-sm text-[#a33131]">{error}</p>}
-      </section>
-    </main>
-  );
-}
-
 function EmptyPage({ title, detail }: { title: string; detail: string }) {
   return (
     <main className="grid min-h-screen place-items-center px-4">
@@ -851,8 +874,8 @@ function EmptyPage({ title, detail }: { title: string; detail: string }) {
 function NavButton({ icon, label, active, onClick }: { icon: React.ReactNode; label: string; active: boolean; onClick: () => void }) {
   return (
     <button
-      className={`flex min-w-fit items-center gap-2 rounded-md border px-3 py-2 text-sm font-semibold ${
-        active ? "border-[#127d84] bg-[#127d84] text-white" : "border-[#d9ded6] bg-white text-[#1b2424]"
+      className={`flex min-w-fit items-center gap-2 rounded-md px-3 py-2 text-sm font-semibold ${
+        active ? "skeuo-primary text-white" : "skeuo-button text-[#1b2424]"
       }`}
       onClick={onClick}
     >
@@ -864,7 +887,7 @@ function NavButton({ icon, label, active, onClick }: { icon: React.ReactNode; la
 
 function Metric({ label, value, detail }: { label: string; value: string; detail: string }) {
   return (
-    <div className="rounded-md border border-[#d9ded6] bg-white p-4 shadow-sm">
+    <div className="skeuo-card rounded-md p-4">
       <p className="text-sm text-[#60706d]">{label}</p>
       <p className="mt-2 text-3xl font-bold">{value}</p>
       <p className="text-sm text-[#60706d]">{detail}</p>
@@ -874,13 +897,52 @@ function Metric({ label, value, detail }: { label: string; value: string; detail
 
 function ActionButton({ icon, label, onClick }: { icon: React.ReactNode; label: string; onClick: () => void }) {
   return (
-    <button className="flex items-center justify-between rounded-md border border-[#d9ded6] bg-white p-4 font-semibold shadow-sm" onClick={onClick}>
-      <span className="flex items-center gap-3">
-        <span className="grid h-10 w-10 place-items-center rounded-md bg-[#f4c430] text-[#1b2424]">{icon}</span>
+    <button className="skeuo-button flex items-center justify-between rounded-md p-3 text-sm font-semibold" onClick={onClick}>
+      <span className="flex items-center gap-2">
+        <span className="grid h-8 w-8 place-items-center rounded-md bg-[#f4c430] text-[#1b2424] shadow-inner">{icon}</span>
         {label}
       </span>
       <ChevronRight size={18} />
     </button>
+  );
+}
+
+function LatestDecks({ decks, cardsByNumber }: { decks: Deck[]; cardsByNumber: Map<string, DigimonCard> }) {
+  if (decks.length === 0) {
+    return <EmptyState title="Todavía no hay decks públicos" detail="Cuando alguien publique un deck, va a aparecer acá." />;
+  }
+
+  return (
+    <section className="space-y-3">
+      <div className="flex items-center justify-between">
+        <h2 className="text-xl font-bold">Latest Decks</h2>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        {decks.map((deck) => {
+          const cover = getDeckCoverCard(deck, splitDeckCards(deck, cardsByNumber).all, cardsByNumber);
+          return (
+            <a
+              key={deck.id}
+              className="card-sleeve relative min-h-44 overflow-hidden rounded-md bg-[#1b2424] p-4 text-white"
+              href={`/decks/${deck.id}`}
+              style={{
+                backgroundImage: cover
+                  ? `linear-gradient(180deg, rgba(20,28,32,0.22), rgba(20,28,32,0.92)), url(${cover.imageUrl})`
+                  : "linear-gradient(135deg, #127d84, #1b2424)",
+                backgroundPosition: "center",
+                backgroundSize: "cover",
+              }}
+            >
+              <span className="rounded bg-black/55 px-2 py-1 text-xs font-bold shadow-sm">{cover?.color[0] ?? "Deck"}</span>
+              <div className="absolute bottom-4 left-4 right-4">
+                <h3 className="truncate text-lg font-bold">{deck.name}</h3>
+                <p className="text-xs text-white/80">{deck.viewCount ?? 0} views</p>
+              </div>
+            </a>
+          );
+        })}
+      </div>
+    </section>
   );
 }
 
@@ -929,8 +991,8 @@ function Select({ value, onChange, options }: { value: string; onChange: (value:
 
 function CardTile({ card, owned, onOpen, onSetOwned, onAddToDeck }: { card: DigimonCard; owned: number; onOpen: () => void; onSetOwned: (quantity: number) => void; onAddToDeck?: () => void }) {
   return (
-    <article className="grid grid-cols-[92px_1fr] gap-3 rounded-md border border-[#d9ded6] bg-white p-3 shadow-sm">
-      <button className="overflow-hidden rounded-md bg-[#eef0e9]" onClick={onOpen}>
+    <article className="skeuo-card grid grid-cols-[92px_1fr] gap-3 rounded-md p-3">
+      <button className="card-sleeve overflow-hidden rounded-md bg-[#eef0e9] p-1" onClick={onOpen}>
         <img className="aspect-[5/7] h-full w-full object-cover" src={card.imageUrl} alt={card.name} loading="lazy" />
       </button>
       <div className="min-w-0">
@@ -947,7 +1009,7 @@ function CardTile({ card, owned, onOpen, onSetOwned, onAddToDeck }: { card: Digi
         <div className="mt-3 flex items-center justify-between gap-2">
           <QuantityStepper value={owned} onChange={onSetOwned} label="Tengo" />
           {onAddToDeck && (
-            <button className="grid h-9 w-9 place-items-center rounded-md border border-[#c9d2cd] text-[#127d84]" title="Agregar al deck activo" onClick={onAddToDeck}>
+            <button className="skeuo-button grid h-9 w-9 place-items-center rounded-md text-[#127d84]" title="Agregar al deck activo" onClick={onAddToDeck}>
               <BookOpen size={17} />
             </button>
           )}
@@ -961,17 +1023,17 @@ function QuantityStepper({ value, onChange, label }: { value: number; onChange: 
   return (
     <div className="flex items-center gap-2">
       <span className="text-sm text-[#60706d]">{label}</span>
-      <button className="grid h-8 w-8 place-items-center rounded-md border border-[#c9d2cd]" title="Reducir" onClick={() => onChange(Math.max(value - 1, 0))}>
+      <button className="skeuo-button grid h-8 w-8 place-items-center rounded-md" title="Reducir" onClick={() => onChange(Math.max(value - 1, 0))}>
         <Minus size={15} />
       </button>
-      <select className="h-8 rounded-md border border-[#c9d2cd] bg-white px-2" value={value} onChange={(event) => onChange(Number(event.target.value))}>
+      <select className="h-8 rounded-md border border-[#b99d76] bg-[#fff9ed] px-2 shadow-inner" value={value} onChange={(event) => onChange(Number(event.target.value))}>
         {quantityOptions.map((option) => (
           <option key={option} value={option}>
             {option}
           </option>
         ))}
       </select>
-      <button className="grid h-8 w-8 place-items-center rounded-md border border-[#c9d2cd]" title="Aumentar" onClick={() => onChange(value + 1)}>
+      <button className="skeuo-button grid h-8 w-8 place-items-center rounded-md" title="Aumentar" onClick={() => onChange(value + 1)}>
         <Plus size={15} />
       </button>
     </div>
@@ -986,7 +1048,7 @@ function DeckSummary({ decks, stats, onOpen }: { decks: Deck[]; stats: ReturnTyp
       <h2 className="text-lg font-bold">Resumen de decks</h2>
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {decks.slice(0, 3).map((deck, index) => (
-          <button key={deck.id} className="rounded-md border border-[#d9ded6] bg-white p-4 text-left shadow-sm" onClick={() => onOpen(deck.id)}>
+          <button key={deck.id} className="skeuo-card rounded-md p-4 text-left" onClick={() => onOpen(deck.id)}>
             <span className="block font-semibold">{deck.name}</span>
             <span className="mt-2 block text-sm text-[#60706d]">
               {stats[index].totalCards} cartas · {stats[index].missingCopies === 0 ? "Completo" : `${stats[index].missingDistinct} cartas distintas faltantes`}
@@ -1018,7 +1080,7 @@ function DeckEditorHeader({
   const publicUrl = typeof window !== "undefined" ? `${window.location.origin}/decks/${deck.id}` : "";
 
   return (
-    <div className="overflow-hidden rounded-md border border-[#d9ded6] bg-white shadow-sm">
+    <div className="skeuo-card overflow-hidden rounded-md">
       <div
         className="min-h-44 p-4 text-white"
         style={{
@@ -1080,7 +1142,7 @@ function DeckEditorHeader({
             placeholder="Notas, plan de juego o idea principal del deck..."
           />
         ) : (
-          <p className="mt-2 min-h-12 rounded-md border border-[#d9ded6] bg-[#f7f7f2] px-3 py-2 text-sm leading-6 text-[#1b2424]">
+          <p className="mt-2 min-h-12 rounded-md border border-[#d9ded6] bg-[#fff4df] px-3 py-2 text-sm leading-6 text-[#1b2424] shadow-inner">
             {deck.description || "Sin descripción."}
           </p>
         )}
@@ -1108,7 +1170,7 @@ function DeckImportPanel({ onImport, disabled }: { onImport: (text: string) => D
   }
 
   return (
-    <form className="rounded-md border border-[#d9ded6] bg-white p-4 shadow-sm" onSubmit={handleSubmit}>
+    <form className="skeuo-card rounded-md p-4" onSubmit={handleSubmit}>
       <div className="flex items-start gap-3">
         <span className="grid h-10 w-10 shrink-0 place-items-center rounded-md bg-[#f4c430] text-[#1b2424]">
           <ClipboardList size={20} />
@@ -1127,7 +1189,7 @@ function DeckImportPanel({ onImport, disabled }: { onImport: (text: string) => D
       <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <p className="text-sm text-[#60706d]">Formato: cantidad, nombre opcional y número. Cada carta se declara una vez.</p>
         <button
-          className="flex items-center justify-center gap-2 rounded-md bg-[#127d84] px-4 py-2 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+          className="skeuo-primary flex items-center justify-center gap-2 rounded-md px-4 py-2 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
           disabled={disabled || text.trim().length === 0}
         >
           <Plus size={17} />
@@ -1135,7 +1197,7 @@ function DeckImportPanel({ onImport, disabled }: { onImport: (text: string) => D
         </button>
       </div>
       {result && (
-        <div className="mt-3 rounded-md bg-[#f7f7f2] p-3 text-sm">
+        <div className="mt-3 rounded-md bg-[#fff4df] p-3 text-sm shadow-inner">
           <p className="font-semibold">
             {result.importedLines} líneas importadas · {result.importedCopies} copias agregadas
           </p>
@@ -1217,10 +1279,10 @@ function DeckCardRow({
 
   return (
     <article
-      className={`grid grid-cols-[72px_1fr] gap-3 rounded-md border p-3 shadow-sm sm:grid-cols-[82px_1fr_auto] sm:items-center ${isCover ? "border-[#f4c430]" : "border-[#d9ded6]"}`}
+      className={`grid grid-cols-[72px_1fr] gap-3 rounded-md border p-3 shadow-sm sm:grid-cols-[82px_1fr_auto] sm:items-center ${isCover ? "border-[#f4c430]" : "border-[#b99d76]"}`}
       style={{ background: getCardRowBackground(card.color) }}
     >
-      <button className="overflow-hidden rounded-md bg-[#eef0e9]" onClick={onOpen} title="Ver carta">
+      <button className="card-sleeve overflow-hidden rounded-md bg-[#eef0e9] p-1" onClick={onOpen} title="Ver carta">
         <img className="aspect-[5/7] h-full w-full object-cover" src={card.imageUrl} alt={card.name} loading="lazy" />
       </button>
       <div className="min-w-0">
@@ -1238,7 +1300,7 @@ function DeckCardRow({
       {isEditing && (
         <div className="flex flex-wrap items-center gap-2 sm:justify-end">
           <button
-            className={`grid h-9 w-9 place-items-center rounded-md border ${isCover ? "border-[#f4c430] bg-[#f4c430] text-[#1b2424]" : "border-[#c9d2cd] bg-white/80 text-[#60706d]"}`}
+            className={`grid h-9 w-9 place-items-center rounded-md border ${isCover ? "border-[#f4c430] bg-[#f4c430] text-[#1b2424]" : "skeuo-button text-[#60706d]"}`}
             title={isCover ? "Portada actual" : "Usar como portada"}
             onClick={onSetCover}
           >
@@ -1267,10 +1329,10 @@ function CompactDeckList({
   onSetCover: (cardNumber: string) => void;
 }) {
   return (
-    <div className="grid gap-5 lg:grid-cols-3">
+    <div className="skeuo-card grid gap-5 rounded-md p-4 lg:grid-cols-3">
       {groups.map((group) => (
         <div key={group.title} className="space-y-2">
-          <h3 className="border-b border-[#c9d2cd] pb-2 font-bold">
+          <h3 className="border-b binder-divider pb-2 font-bold">
             {group.title} ({group.items.reduce((sum, item) => sum + item.quantityRequired, 0)})
           </h3>
           <div className="space-y-1">
@@ -1310,7 +1372,7 @@ function CompactDeckRow({
   const missing = Math.max(item.quantityRequired - owned, 0);
 
   return (
-    <div className="grid grid-cols-[24px_minmax(0,1fr)_auto_auto] items-center gap-2 rounded px-1 py-1 text-sm hover:bg-white/70">
+    <div className="grid grid-cols-[24px_minmax(0,1fr)_auto_auto] items-center gap-2 rounded px-1 py-1 text-sm hover:bg-[#fff4df]">
       <span className="font-semibold text-[#1d5fa8]">{item.quantityRequired}</span>
       <button className="truncate text-left font-semibold" onClick={onOpen}>
         {item.card.name}
@@ -1334,8 +1396,10 @@ function CompactDeckRow({
 
 function AddDeckCardTile({ card, required, owned, onChange }: { card: DigimonCard; required: number; owned: number; onChange: (quantity: number) => void }) {
   return (
-    <article className="grid grid-cols-[64px_1fr] gap-3 rounded-md border border-[#d9ded6] bg-white p-3 shadow-sm">
-      <img className="aspect-[5/7] rounded-md object-cover" src={card.imageUrl} alt={card.name} loading="lazy" />
+    <article className="skeuo-card grid grid-cols-[64px_1fr] gap-3 rounded-md p-3">
+      <div className="card-sleeve rounded-md p-1">
+        <img className="aspect-[5/7] rounded object-cover" src={card.imageUrl} alt={card.name} loading="lazy" />
+      </div>
       <div className="min-w-0">
         <h3 className="truncate font-semibold">{card.name}</h3>
         <p className="text-sm text-[#60706d]">
@@ -1362,7 +1426,7 @@ function CardDetail({
 }) {
   return (
     <div className="fixed inset-0 z-30 grid place-items-end bg-black/45 p-0 sm:place-items-center sm:p-4" onClick={onClose}>
-      <section className="max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-t-md bg-white p-4 shadow-lg sm:rounded-md" onClick={(event) => event.stopPropagation()}>
+      <section className="skeuo-card max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-t-md p-4 sm:rounded-md" onClick={(event) => event.stopPropagation()}>
         <div className="flex items-start justify-between gap-3">
           <div>
             <h2 className="text-2xl font-bold">{card.name}</h2>
@@ -1373,12 +1437,14 @@ function CardDetail({
               {card.variantLabel}
             </p>
           </div>
-          <button className="grid h-10 w-10 place-items-center rounded-md border border-[#c9d2cd]" onClick={onClose} title="Cerrar">
+          <button className="skeuo-button grid h-10 w-10 place-items-center rounded-md" onClick={onClose} title="Cerrar">
             ×
           </button>
         </div>
         <div className="mt-4 grid gap-4 md:grid-cols-[240px_1fr]">
-          <img className="w-full rounded-md border border-[#d9ded6] bg-[#eef0e9]" src={card.imageUrl} alt={card.name} />
+          <div className="card-sleeve rounded-md p-2">
+            <img className="w-full rounded-md bg-[#eef0e9]" src={card.imageUrl} alt={card.name} />
+          </div>
           <div className="space-y-3">
             <Info label="Color" value={card.color.join(" / ")} />
             <Info label="Tipo" value={card.type} />
@@ -1393,7 +1459,7 @@ function CardDetail({
               </div>
             </div>
             {card.effect && (
-              <p className="rounded-md bg-[#f7f7f2] p-3 text-sm leading-7">
+              <p className="rounded-md bg-[#fff4df] p-3 text-sm leading-7 shadow-inner">
                 <HighlightedEffectText text={card.effect} />
               </p>
             )}

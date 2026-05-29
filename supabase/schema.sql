@@ -12,7 +12,7 @@ create table if not exists public.decks (
   name text not null,
   description text,
   cover_card_number text,
-  is_public boolean not null default false,
+  is_public boolean not null default true,
   view_count integer not null default 0,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
