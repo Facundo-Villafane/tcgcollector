@@ -8,10 +8,12 @@ import {
   ChevronRight,
   ClipboardList,
   Crown,
+  Eye,
   Images,
   Library,
   List,
   Minus,
+  Pencil,
   Plus,
   Search,
   Share2,
@@ -25,6 +27,7 @@ import type { CollectionMap, Deck, DigimonCard, UserProfile } from "@/lib/types"
 import { createClient } from "@/utils/supabase/client";
 
 type View = "dashboard" | "catalog" | "collection" | "decks";
+type DeckMode = "view" | "edit";
 
 const STORAGE_KEYS = {
   collection: "tamer-binder:collection",
@@ -75,6 +78,8 @@ export default function Home() {
   const [collection, setCollection] = useState<CollectionMap>({});
   const [decks, setDecks] = useState<Deck[]>([]);
   const [activeDeckId, setActiveDeckId] = useState("");
+  const [deckMode, setDeckMode] = useState<DeckMode>("view");
+  const [isCreatingDeck, setIsCreatingDeck] = useState(false);
   const [newDeckName, setNewDeckName] = useState("");
   const [selectedCard, setSelectedCard] = useState<DigimonCard | null>(null);
   const [selectedCardOwnedOverride, setSelectedCardOwnedOverride] = useState<number | null>(null);
@@ -400,6 +405,8 @@ export default function Home() {
 
     setDecks((current) => [deck, ...current]);
     setActiveDeckId(deck.id);
+    setDeckMode("edit");
+    setIsCreatingDeck(false);
     setNewDeckName("");
     setView("decks");
   }
@@ -604,23 +611,33 @@ export default function Home() {
                 <h1 className="text-2xl font-bold">Mis decks</h1>
                 <p className="text-sm text-[#60706d]">Construí listas y revisá faltantes.</p>
               </div>
-              <form className="rounded-md border border-[#d9ded6] bg-white p-3 shadow-sm" onSubmit={createDeck}>
-                <label className="text-sm font-semibold" htmlFor="deck-name">
+              {isCreatingDeck ? (
+                <form className="rounded-md border border-[#d9ded6] bg-white p-3 shadow-sm" onSubmit={createDeck}>
+                  <label className="text-sm font-semibold" htmlFor="deck-name">
+                    Nuevo deck
+                  </label>
+                  <div className="mt-2 flex gap-2">
+                    <input
+                      id="deck-name"
+                      className="min-w-0 flex-1 rounded-md border border-[#c9d2cd] px-3 py-2 outline-none focus:border-[#127d84]"
+                      value={newDeckName}
+                      onChange={(event) => setNewDeckName(event.target.value)}
+                      placeholder="Red Greymon"
+                    />
+                    <button className="grid h-10 w-10 place-items-center rounded-md bg-[#127d84] text-white" title="Crear deck">
+                      <Plus size={18} />
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                <button
+                  className="flex w-full items-center justify-center gap-2 rounded-md border border-[#c9d2cd] bg-white px-3 py-2 font-semibold shadow-sm"
+                  onClick={() => setIsCreatingDeck(true)}
+                >
+                  <Plus size={17} />
                   Nuevo deck
-                </label>
-                <div className="mt-2 flex gap-2">
-                  <input
-                    id="deck-name"
-                    className="min-w-0 flex-1 rounded-md border border-[#c9d2cd] px-3 py-2 outline-none focus:border-[#127d84]"
-                    value={newDeckName}
-                    onChange={(event) => setNewDeckName(event.target.value)}
-                    placeholder="Red Greymon"
-                  />
-                  <button className="grid h-10 w-10 place-items-center rounded-md bg-[#127d84] text-white" title="Crear deck">
-                    <Plus size={18} />
-                  </button>
-                </div>
-              </form>
+                </button>
+              )}
 
               <div className="space-y-2">
                 {decks.length === 0 && <EmptyState title="Sin decks" detail="Creá tu primer deck para comparar con tu colección." />}
@@ -632,7 +649,10 @@ export default function Home() {
                       className={`w-full rounded-md border p-3 text-left shadow-sm ${
                         activeDeck?.id === deck.id ? "border-[#127d84] bg-[#e9f5f3]" : "border-[#d9ded6] bg-white"
                       }`}
-                      onClick={() => setActiveDeckId(deck.id)}
+                      onClick={() => {
+                        setActiveDeckId(deck.id);
+                        setDeckMode("view");
+                      }}
                     >
                       <span className="block font-semibold">{deck.name}</span>
                       <span className="mt-1 block text-sm text-[#60706d]">
@@ -647,28 +667,54 @@ export default function Home() {
             <div className="space-y-4">
               {activeDeck ? (
                 <>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex rounded-md border border-[#c9d2cd] bg-white p-1 shadow-sm">
+                      <button
+                        className={`flex items-center gap-2 rounded px-3 py-2 text-sm font-semibold ${deckMode === "view" ? "bg-[#127d84] text-white" : "text-[#60706d]"}`}
+                        onClick={() => setDeckMode("view")}
+                      >
+                        <Eye size={16} />
+                        Vista
+                      </button>
+                      <button
+                        className={`flex items-center gap-2 rounded px-3 py-2 text-sm font-semibold ${deckMode === "edit" ? "bg-[#127d84] text-white" : "text-[#60706d]"}`}
+                        onClick={() => setDeckMode("edit")}
+                      >
+                        <Pencil size={16} />
+                        Editar
+                      </button>
+                    </div>
+                    {deckMode === "view" && (
+                      <p className="text-sm text-[#60706d]">Modo solo lectura. Entrá a editar para modificar este deck.</p>
+                    )}
+                  </div>
                   <DeckEditorHeader
                     deck={activeDeck}
                     coverCard={getDeckCoverCard(activeDeck, activeDeckCards.all, cardsByNumber)}
                     stats={getDeckStats(activeDeck, ownedByCardNumber, cardsByNumber)}
+                    isEditing={deckMode === "edit"}
                     onDescriptionChange={(description) => updateDeckDetails(activeDeck.id, { description })}
                     onPublicChange={(isPublic) => updateDeckDetails(activeDeck.id, { isPublic })}
                     onDelete={() => deleteDeck(activeDeck.id)}
                   />
-                  <DeckImportPanel onImport={(text) => importDeckList(activeDeck.id, text)} disabled={cards.length === 0} />
-                  <Filters
-                    query={query}
-                    setQuery={setQuery}
-                    color={color}
-                    setColor={setColor}
-                    type={type}
-                    setType={setType}
-                    setCode={setCode}
-                    setSetCode={setSetCode}
-                    colors={colors}
-                    types={types}
-                    sets={sets}
-                  />
+                  {deckMode === "edit" && (
+                    <>
+                      <DeckImportPanel onImport={(text) => importDeckList(activeDeck.id, text)} disabled={cards.length === 0} />
+                      <Filters
+                        query={query}
+                        setQuery={setQuery}
+                        color={color}
+                        setColor={setColor}
+                        type={type}
+                        setType={setType}
+                        setCode={setCode}
+                        setSetCode={setSetCode}
+                        colors={colors}
+                        types={types}
+                        sets={sets}
+                      />
+                    </>
+                  )}
                   <div className="grid gap-3">
                     {activeDeck.cards.length > 0 && (
                       <div className="space-y-2">
@@ -694,6 +740,7 @@ export default function Home() {
                                 setSelectedCard(card);
                               }}
                               coverCardNumber={activeDeck.coverCardNumber}
+                              isEditing={deckMode === "edit"}
                               onSetCover={(cardNumber) => updateDeckDetails(activeDeck.id, { coverCardNumber: cardNumber })}
                             />
                             <DeckSection
@@ -706,6 +753,7 @@ export default function Home() {
                                 setSelectedCard(card);
                               }}
                               coverCardNumber={activeDeck.coverCardNumber}
+                              isEditing={deckMode === "edit"}
                               onSetCover={(cardNumber) => updateDeckDetails(activeDeck.id, { coverCardNumber: cardNumber })}
                             />
                           </>
@@ -714,6 +762,7 @@ export default function Home() {
                             groups={activeDeckCards.groups}
                             ownedByCardNumber={ownedByCardNumber}
                             coverCardNumber={activeDeck.coverCardNumber}
+                            isEditing={deckMode === "edit"}
                             onOpen={(card) => {
                               setSelectedCardOwnedOverride(ownedByCardNumber[normalizeCardNumber(card.cardNumber)] ?? 0);
                               setSelectedCard(card);
@@ -724,7 +773,7 @@ export default function Home() {
                       </div>
                     )}
 
-                    <div className="space-y-2">
+                    {deckMode === "edit" && <div className="space-y-2">
                       <h2 className="text-sm font-bold uppercase tracking-wide text-[#60706d]">Agregar cartas</h2>
                       <div className="grid gap-3 sm:grid-cols-2">
                         {filteredCards.filter((card) => !card.isAlternateArt).slice(0, 20).map((card) => {
@@ -742,7 +791,7 @@ export default function Home() {
                           );
                         })}
                       </div>
-                    </div>
+                    </div>}
                   </div>
                 </>
               ) : (
@@ -953,6 +1002,7 @@ function DeckEditorHeader({
   deck,
   coverCard,
   stats,
+  isEditing,
   onDescriptionChange,
   onPublicChange,
   onDelete,
@@ -960,6 +1010,7 @@ function DeckEditorHeader({
   deck: Deck;
   coverCard?: DigimonCard;
   stats: ReturnType<typeof getDeckStats>;
+  isEditing: boolean;
   onDescriptionChange: (description: string) => void;
   onPublicChange: (isPublic: boolean) => void;
   onDelete: () => void;
@@ -986,12 +1037,18 @@ function DeckEditorHeader({
             </p>
             {coverCard && <p className="mt-2 text-sm font-semibold text-[#f4c430]">Portada: {coverCard.name}</p>}
             <div className="mt-3 flex flex-wrap gap-2">
-              <button
-                className={`rounded-md px-3 py-2 text-sm font-semibold ${deck.isPublic ? "bg-[#e3f6df] text-[#187a45]" : "bg-white/15 text-white"}`}
-                onClick={() => onPublicChange(!(deck.isPublic ?? false))}
-              >
-                {deck.isPublic ? "Publicado" : "Privado"}
-              </button>
+              {isEditing ? (
+                <button
+                  className={`rounded-md px-3 py-2 text-sm font-semibold ${deck.isPublic ? "bg-[#e3f6df] text-[#187a45]" : "bg-white/15 text-white"}`}
+                  onClick={() => onPublicChange(!(deck.isPublic ?? false))}
+                >
+                  {deck.isPublic ? "Publicado" : "Privado"}
+                </button>
+              ) : (
+                <span className={`rounded-md px-3 py-2 text-sm font-semibold ${deck.isPublic ? "bg-[#e3f6df] text-[#187a45]" : "bg-white/15 text-white"}`}>
+                  {deck.isPublic ? "Publicado" : "Privado"}
+                </span>
+              )}
               {deck.isPublic && (
                 <button
                   className="flex items-center gap-2 rounded-md bg-white/15 px-3 py-2 text-sm font-semibold text-white"
@@ -1003,22 +1060,30 @@ function DeckEditorHeader({
               )}
             </div>
           </div>
-        <button className="grid h-10 w-10 place-items-center rounded-md border border-white/25 bg-black/20 text-white" title="Eliminar deck" onClick={onDelete}>
-          <Trash2 size={18} />
-        </button>
+        {isEditing && (
+          <button className="grid h-10 w-10 place-items-center rounded-md border border-white/25 bg-black/20 text-white" title="Eliminar deck" onClick={onDelete}>
+            <Trash2 size={18} />
+          </button>
+        )}
       </div>
       </div>
       <div className="p-4">
         <label className="text-xs font-bold uppercase tracking-wide text-[#60706d]" htmlFor={`deck-description-${deck.id}`}>
           Deck primer
         </label>
-        <textarea
-          id={`deck-description-${deck.id}`}
-          className="mt-2 min-h-20 w-full resize-y rounded-md border border-[#c9d2cd] px-3 py-2 outline-none focus:border-[#127d84]"
-          value={deck.description ?? ""}
-          onChange={(event) => onDescriptionChange(event.target.value)}
-          placeholder="Notas, plan de juego o idea principal del deck..."
-        />
+        {isEditing ? (
+          <textarea
+            id={`deck-description-${deck.id}`}
+            className="mt-2 min-h-20 w-full resize-y rounded-md border border-[#c9d2cd] px-3 py-2 outline-none focus:border-[#127d84]"
+            value={deck.description ?? ""}
+            onChange={(event) => onDescriptionChange(event.target.value)}
+            placeholder="Notas, plan de juego o idea principal del deck..."
+          />
+        ) : (
+          <p className="mt-2 min-h-12 rounded-md border border-[#d9ded6] bg-[#f7f7f2] px-3 py-2 text-sm leading-6 text-[#1b2424]">
+            {deck.description || "Sin descripción."}
+          </p>
+        )}
       <div className="mt-4 grid gap-2 sm:grid-cols-3">
         <Metric label="Cartas distintas" value={deck.cards.length.toString()} detail="en la lista" />
         <Metric label="Faltan distintas" value={stats.missingDistinct.toString()} detail="cartas no completas" />
@@ -1093,6 +1158,7 @@ function DeckSection({
   onChange,
   onOpen,
   coverCardNumber,
+  isEditing,
   onSetCover,
 }: {
   title: string;
@@ -1101,6 +1167,7 @@ function DeckSection({
   onChange: (cardNumber: string, quantity: number) => void;
   onOpen: (card: DigimonCard) => void;
   coverCardNumber?: string;
+  isEditing: boolean;
   onSetCover: (cardNumber: string) => void;
 }) {
   if (items.length === 0) return null;
@@ -1118,6 +1185,7 @@ function DeckSection({
             onOpen={() => onOpen(item.card)}
             onChange={(quantity) => onChange(item.cardNumber, quantity)}
             isCover={normalizeCardNumber(coverCardNumber ?? "") === normalizeCardNumber(item.cardNumber)}
+            isEditing={isEditing}
             onSetCover={() => onSetCover(item.cardNumber)}
           />
         ))}
@@ -1133,6 +1201,7 @@ function DeckCardRow({
   onOpen,
   onChange,
   isCover,
+  isEditing,
   onSetCover,
 }: {
   card: DigimonCard;
@@ -1141,6 +1210,7 @@ function DeckCardRow({
   onOpen: () => void;
   onChange: (quantity: number) => void;
   isCover: boolean;
+  isEditing: boolean;
   onSetCover: () => void;
 }) {
   const missing = Math.max(required - owned, 0);
@@ -1165,16 +1235,18 @@ function DeckCardRow({
           {missing === 0 ? "Completa" : `Falta ${missing}`}
         </p>
       </div>
-      <div className="flex flex-wrap items-center gap-2 sm:justify-end">
-        <button
-          className={`grid h-9 w-9 place-items-center rounded-md border ${isCover ? "border-[#f4c430] bg-[#f4c430] text-[#1b2424]" : "border-[#c9d2cd] bg-white/80 text-[#60706d]"}`}
-          title={isCover ? "Portada actual" : "Usar como portada"}
-          onClick={onSetCover}
-        >
-          <Crown size={16} />
-        </button>
-        <QuantityStepper value={required} onChange={onChange} label="Deck" />
-      </div>
+      {isEditing && (
+        <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+          <button
+            className={`grid h-9 w-9 place-items-center rounded-md border ${isCover ? "border-[#f4c430] bg-[#f4c430] text-[#1b2424]" : "border-[#c9d2cd] bg-white/80 text-[#60706d]"}`}
+            title={isCover ? "Portada actual" : "Usar como portada"}
+            onClick={onSetCover}
+          >
+            <Crown size={16} />
+          </button>
+          <QuantityStepper value={required} onChange={onChange} label="Deck" />
+        </div>
+      )}
     </article>
   );
 }
@@ -1183,12 +1255,14 @@ function CompactDeckList({
   groups,
   ownedByCardNumber,
   coverCardNumber,
+  isEditing,
   onOpen,
   onSetCover,
 }: {
   groups: Array<{ title: string; items: Array<{ cardNumber: string; card: DigimonCard; quantityRequired: number }> }>;
   ownedByCardNumber: CollectionMap;
   coverCardNumber?: string;
+  isEditing: boolean;
   onOpen: (card: DigimonCard) => void;
   onSetCover: (cardNumber: string) => void;
 }) {
@@ -1206,6 +1280,7 @@ function CompactDeckList({
                 item={item}
                 owned={ownedByCardNumber[normalizeCardNumber(item.cardNumber)] ?? 0}
                 isCover={normalizeCardNumber(coverCardNumber ?? "") === normalizeCardNumber(item.cardNumber)}
+                isEditing={isEditing}
                 onOpen={() => onOpen(item.card)}
                 onSetCover={() => onSetCover(item.cardNumber)}
               />
@@ -1221,12 +1296,14 @@ function CompactDeckRow({
   item,
   owned,
   isCover,
+  isEditing,
   onOpen,
   onSetCover,
 }: {
   item: { cardNumber: string; card: DigimonCard; quantityRequired: number };
   owned: number;
   isCover: boolean;
+  isEditing: boolean;
   onOpen: () => void;
   onSetCover: () => void;
 }) {
@@ -1240,13 +1317,17 @@ function CompactDeckRow({
         <span className="ml-1 text-[10px] font-normal text-[#60706d]">{item.card.cardNumber}</span>
       </button>
       <span className={`h-2.5 w-2.5 rounded-full ${missing === 0 ? "bg-[#187a45]" : "bg-[#d9534f]"}`} title={missing === 0 ? "Completa" : `Falta ${missing}`} />
-      <button
-        className={`grid h-7 w-7 place-items-center rounded ${isCover ? "bg-[#f4c430] text-[#1b2424]" : "text-[#60706d] hover:bg-white"}`}
-        title={isCover ? "Portada actual" : "Usar como portada"}
-        onClick={onSetCover}
-      >
-        <Crown size={14} />
-      </button>
+      {isEditing ? (
+        <button
+          className={`grid h-7 w-7 place-items-center rounded ${isCover ? "bg-[#f4c430] text-[#1b2424]" : "text-[#60706d] hover:bg-white"}`}
+          title={isCover ? "Portada actual" : "Usar como portada"}
+          onClick={onSetCover}
+        >
+          <Crown size={14} />
+        </button>
+      ) : (
+        <span className="w-7" />
+      )}
     </div>
   );
 }
