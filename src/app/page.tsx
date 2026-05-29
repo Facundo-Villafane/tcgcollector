@@ -194,22 +194,22 @@ export default function Home() {
   const filteredCards = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
 
-    return cards
-      .filter((card) => {
-        const matchesQuery =
-          normalizedQuery.length === 0 ||
-          card.name.toLowerCase().includes(normalizedQuery) ||
-          card.cardNumber.toLowerCase().includes(normalizedQuery) ||
-          card.setName.toLowerCase().includes(normalizedQuery) ||
-          card.setCode.toLowerCase().includes(normalizedQuery);
-        const matchesColor = color === "All" || card.color.includes(color);
-        const matchesType = type === "All" || card.type === type;
-        const matchesSet = setCode === "All" || card.setCode === setCode;
+    const result = cards.filter((card) => {
+      const matchesQuery =
+        normalizedQuery.length === 0 ||
+        card.name.toLowerCase().includes(normalizedQuery) ||
+        card.cardNumber.toLowerCase().includes(normalizedQuery) ||
+        card.setName.toLowerCase().includes(normalizedQuery) ||
+        card.setCode.toLowerCase().includes(normalizedQuery);
+      const matchesColor = color === "All" || card.color.includes(color);
+      const matchesType = type === "All" || card.type === type;
+      const matchesSet = setCode === "All" || card.setCode === setCode;
 
-        return matchesQuery && matchesColor && matchesType && matchesSet;
-      })
-      .slice(0, 80);
-  }, [cards, color, query, setCode, type]);
+      return matchesQuery && matchesColor && matchesType && matchesSet;
+    });
+
+    return view === "catalog" ? result.slice(0, 80) : result;
+  }, [cards, color, query, setCode, type, view]);
 
   const colors = useMemo(() => unique(cards.flatMap((card) => card.color)).sort(), [cards]);
   const types = useMemo(() => unique(cards.map((card) => card.type)).sort(), [cards]);
@@ -1041,6 +1041,7 @@ function CollectionScanner({
   const [isScanning, setIsScanning] = useState(false);
   const [isTorchOn, setIsTorchOn] = useState(false);
   const [isTorchSupported, setIsTorchSupported] = useState(false);
+  const [pendingCard, setPendingCard] = useState<DigimonCard | null>(null);
   const [scanStatus, setScanStatus] = useState("");
   const [detectedText, setDetectedText] = useState("");
 
@@ -1112,6 +1113,7 @@ function CollectionScanner({
     setIsScanning(false);
     setIsTorchOn(false);
     setIsTorchSupported(false);
+    setPendingCard(null);
   }
 
   async function toggleTorch() {
@@ -1168,8 +1170,8 @@ function CollectionScanner({
         return;
       }
 
-      onAddCard(card);
-      setScanStatus(`${card.name} ${card.cardNumber} +1 a tu colección.`);
+      setPendingCard(card);
+      setScanStatus("");
     } catch {
       setScanStatus("Falló el OCR local. Podés sumar la carta escribiendo el número.");
     } finally {
@@ -1243,15 +1245,45 @@ function CollectionScanner({
 
             <canvas ref={canvasRef} className="hidden" />
 
-            <div className="mt-4 flex flex-col gap-2 sm:flex-row">
-              <button className="skeuo-primary flex flex-1 items-center justify-center gap-2 rounded-md px-4 py-3 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60" disabled={isScanning} onClick={scanFrame}>
-                <ScanLine size={17} />
-                {isScanning ? "Leyendo..." : "Leer número"}
-              </button>
-              <button className="skeuo-button rounded-md px-4 py-3 font-semibold" onClick={stopCamera}>
-                Cerrar
-              </button>
-            </div>
+            {pendingCard ? (
+              <div className="mt-4 flex items-center gap-4 rounded-md border-2 border-[#f4c430] bg-[#fffbe8] p-3 shadow-inner">
+                {pendingCard.imageUrl && (
+                  <img src={pendingCard.imageUrl} alt={pendingCard.name} className="h-20 w-14 flex-shrink-0 rounded object-cover shadow" />
+                )}
+                <div className="min-w-0 flex-1">
+                  <p className="font-bold leading-tight">{pendingCard.name}</p>
+                  <p className="text-sm text-[#60706d]">{pendingCard.cardNumber} · {pendingCard.setName}</p>
+                  <div className="mt-3 flex gap-2">
+                    <button
+                      className="skeuo-primary flex-1 rounded-md px-3 py-2 text-sm font-semibold text-white"
+                      onClick={() => {
+                        onAddCard(pendingCard);
+                        setScanStatus(`${pendingCard.name} ${pendingCard.cardNumber} +1 a tu colección.`);
+                        setPendingCard(null);
+                      }}
+                    >
+                      Confirmar +1
+                    </button>
+                    <button
+                      className="skeuo-button rounded-md px-3 py-2 text-sm font-semibold"
+                      onClick={() => setPendingCard(null)}
+                    >
+                      Reintentar
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+                <button className="skeuo-primary flex flex-1 items-center justify-center gap-2 rounded-md px-4 py-3 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60" disabled={isScanning} onClick={scanFrame}>
+                  <ScanLine size={17} />
+                  {isScanning ? "Leyendo..." : "Leer número"}
+                </button>
+                <button className="skeuo-button rounded-md px-4 py-3 font-semibold" onClick={stopCamera}>
+                  Cerrar
+                </button>
+              </div>
+            )}
 
             {detectedText && (
               <details className="mt-3 text-sm text-[#60706d]">
