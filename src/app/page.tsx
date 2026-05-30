@@ -1148,31 +1148,60 @@ function CollectionScanner({
 
       const sourceWidth = video.videoWidth;
       const sourceHeight = video.videoHeight;
-      const cropY = Math.floor(sourceHeight * 0.52);
-      const cropHeight = Math.floor(sourceHeight * 0.46);
-      canvas.width = sourceWidth;
-      canvas.height = cropHeight;
 
-      const { recognize } = await import("tesseract.js");
+      const { PSM, recognize } = await import("tesseract.js");
+
+      const regions = [
+        { name: "número abajo derecha", x: 0.52, y: 0.58, width: 0.46, height: 0.2, mode: PSM.SINGLE_LINE },
+        { name: "franja nombre derecha", x: 0.36, y: 0.56, width: 0.62, height: 0.25, mode: PSM.SPARSE_TEXT },
+        { name: "franja inferior", x: 0, y: 0.52, width: 1, height: 0.46, mode: PSM.SPARSE_TEXT },
+      ];
 
       const filterPasses = [
-        "contrast(1.55) grayscale(1)",
-        "brightness(0.6) contrast(2.5) grayscale(1)",
-        "invert(1) contrast(1.8) grayscale(1)",
+        { name: "contraste", filter: "contrast(1.8) grayscale(1)" },
+        { name: "foil claro", filter: "brightness(1.35) contrast(2.8) grayscale(1)" },
+        { name: "foil oscuro", filter: "brightness(0.58) contrast(3) grayscale(1)" },
+        { name: "binarizado", filter: "contrast(2.4) grayscale(1)", threshold: 148 },
+        { name: "invertido", filter: "invert(1) contrast(2.2) grayscale(1)", threshold: 132, invert: true },
       ];
 
       let cardNumber = "";
-      let lastText = "";
-      for (const filter of filterPasses) {
-        context.filter = filter;
-        context.drawImage(video, 0, cropY, sourceWidth, cropHeight, 0, 0, sourceWidth, cropHeight);
-        const result = await recognize(canvas, "eng");
-        lastText = result.data.text;
-        cardNumber = extractCardNumber(lastText);
+      const ocrAttempts: string[] = [];
+
+      for (const region of regions) {
+        const sourceX = Math.floor(sourceWidth * region.x);
+        const sourceY = Math.floor(sourceHeight * region.y);
+        const regionWidth = Math.floor(sourceWidth * region.width);
+        const regionHeight = Math.floor(sourceHeight * region.height);
+        const targetWidth = Math.max(640, regionWidth * 2);
+        const targetHeight = Math.max(180, regionHeight * 2);
+
+        canvas.width = targetWidth;
+        canvas.height = targetHeight;
+
+        for (const pass of filterPasses) {
+          context.clearRect(0, 0, targetWidth, targetHeight);
+          context.filter = pass.filter;
+          context.drawImage(video, sourceX, sourceY, regionWidth, regionHeight, 0, 0, targetWidth, targetHeight);
+
+          if (pass.threshold) {
+            applyThreshold(context, targetWidth, targetHeight, pass.threshold, pass.invert ?? false);
+          }
+
+          const result = await recognize(canvas, "eng", {
+            tessedit_char_whitelist: "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-",
+            tessedit_pageseg_mode: region.mode,
+          } as unknown as Parameters<typeof recognize>[2]);
+          const text = result.data.text.trim();
+          ocrAttempts.push(`${region.name} / ${pass.name}: ${text}`);
+          cardNumber = extractCardNumber(text);
+          if (cardNumber) break;
+        }
+
         if (cardNumber) break;
       }
 
-      setDetectedText(lastText.trim());
+      setDetectedText(ocrAttempts.filter(Boolean).join("\n\n"));
 
       if (!cardNumber) {
         setScanStatus("No pude leer el número. Acercá la carta, evitá reflejos o escribilo manualmente.");
@@ -2187,23 +2216,48 @@ function normalizeCardNumber(cardNumber: string) {
   return cardNumber.trim().toUpperCase().replace(/_P\d+$/, "");
 }
 
+function applyThreshold(context: CanvasRenderingContext2D, width: number, height: number, threshold: number, invert: boolean) {
+  const image = context.getImageData(0, 0, width, height);
+
+  for (let index = 0; index < image.data.length; index += 4) {
+    const red = image.data[index] ?? 0;
+    const green = image.data[index + 1] ?? 0;
+    const blue = image.data[index + 2] ?? 0;
+    const luminance = red * 0.299 + green * 0.587 + blue * 0.114;
+    let value = luminance > threshold ? 255 : 0;
+    if (invert) value = 255 - value;
+    image.data[index] = value;
+    image.data[index + 1] = value;
+    image.data[index + 2] = value;
+  }
+
+  context.putImageData(image, 0, 0);
+}
+
 function extractCardNumber(text: string) {
   const normalizedText = text
     .toUpperCase()
     .replace(/[|]/g, "I")
+    .replace(/[—–_./]/g, "-")
     .replace(/\s+/g, " ");
 
-  const match = normalizedText.match(/\b((?:P|LM)\s*-?\s*\d{2,3}|[A-Z]{2,3}\s*-?\s*\d{1,2}\s*-?\s*\d{2,3})\b/);
+  const match = normalizedText.match(/\b((?:P|LM)\s*-?\s*[0-9OQISL]{2,3}|[A-Z]{2,3}\s*-?\s*[0-9OQISL]{1,2}\s*-?\s*[0-9OQISL]{2,3})\b/);
   if (!match?.[1]) return "";
 
   const compact = match[1].replace(/\s+/g, "").replace(/--+/g, "-");
-  const promoMatch = compact.match(/^(P|LM)-?(\d{2,3})$/);
-  if (promoMatch) return `${promoMatch[1]}-${promoMatch[2]}`;
+  const promoMatch = compact.match(/^(P|LM)-?([0-9OQISL]{2,3})$/);
+  if (promoMatch) return `${promoMatch[1]}-${cleanOcrDigits(promoMatch[2])}`;
 
-  const standardMatch = compact.match(/^([A-Z]{2})-?(\d{1,2})-?(\d{2,3})$/);
+  const standardMatch = compact.match(/^([A-Z]{2,3})-?([0-9OQISL]{1,2})-?([0-9OQISL]{2,3})$/);
   if (!standardMatch) return compact;
 
-  return `${standardMatch[1]}${Number(standardMatch[2])}-${standardMatch[3]}`;
+  return `${standardMatch[1]}${Number(cleanOcrDigits(standardMatch[2]))}-${cleanOcrDigits(standardMatch[3])}`;
+}
+
+function cleanOcrDigits(value: string) {
+  return value
+    .replace(/[OQ]/g, "0")
+    .replace(/[ISL]/g, "1");
 }
 
 function readStorage<T>(key: string, fallback: T): T {
