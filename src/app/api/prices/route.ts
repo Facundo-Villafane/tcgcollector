@@ -10,7 +10,7 @@ export async function GET(request: NextRequest) {
     .filter(Boolean);
 
   if (!cardNumbers?.length) {
-    return NextResponse.json({ prices: {}, missing: [], sourceReady: Boolean(process.env.TCGAPI_KEY) });
+    return NextResponse.json({ prices: {}, missing: [], sourceReady: hasPriceSource() });
   }
 
   try {
@@ -21,6 +21,10 @@ export async function GET(request: NextRequest) {
     const message = error instanceof Error ? error.message : "Unexpected price API error";
     return NextResponse.json({ error: message, prices: {}, missing: cardNumbers }, { status: 502 });
   }
+}
+
+function hasPriceSource() {
+  return Boolean(process.env.TCGAPI_DEV_KEY ?? process.env.TCGAPI_DOT_DEV_KEY ?? process.env.TCGAPI_KEY);
 }
 
 function getCardNamesByNumber(cards: Awaited<ReturnType<typeof getDigimonCards>>) {

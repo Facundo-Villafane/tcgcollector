@@ -26,7 +26,7 @@ import {
   User as UserIcon,
   X,
 } from "lucide-react";
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { User as SupabaseUser } from "@supabase/supabase-js";
 import type { CardPriceMap, CollectionMap, Deck, DigimonCard, UserProfile } from "@/lib/types";
 import { createClient } from "@/utils/supabase/client";
@@ -268,39 +268,51 @@ export default function Home() {
   const ownedCopies = Object.values(collection).reduce((sum, quantity) => sum + quantity, 0);
   const totalMissingValue = deckPriceStats.reduce((sum, stat) => sum + stat.missingValue, 0);
   const collectionValue = getCollectionValue(collection, cardsById, cardPrices);
+  const pricedVisibleCards = visibleCards.filter((card) => cardPrices[normalizeCardNumber(card.cardNumber)]?.marketPrice !== undefined).length;
+
+  const refreshPrices = useCallback(async (cardNumbers: string[], signal?: AbortSignal) => {
+    const normalizedCardNumbers = unique(cardNumbers.map(normalizeCardNumber).filter(Boolean)).slice(0, 120);
+    if (normalizedCardNumbers.length === 0) {
+      setPriceStatus("No hay cartas para consultar");
+      return;
+    }
+
+    setPriceStatus("Actualizando precios...");
+    const response = await fetch(`/api/prices?cards=${encodeURIComponent(normalizedCardNumbers.join(","))}`, { signal });
+    if (!response.ok) {
+      setPriceStatus("Precios no disponibles");
+      return;
+    }
+
+    const payload = (await response.json()) as { prices?: CardPriceMap; missing?: string[]; sourceReady?: boolean };
+    const nextPrices = payload.prices ?? {};
+    setCardPrices((current) => ({ ...current, ...nextPrices }));
+
+    if (!payload.sourceReady) {
+      setPriceStatus("Falta TCGAPI_DEV_KEY en Vercel");
+      return;
+    }
+
+    const loadedCount = Object.keys(nextPrices).length;
+    const missingCount = payload.missing?.length ?? 0;
+    setPriceStatus(loadedCount > 0 ? `${loadedCount} precios actualizados${missingCount > 0 ? ` · ${missingCount} pendientes` : ""}` : "Sin precios para esas cartas");
+  }, []);
 
   useEffect(() => {
     if (pricedCardNumbers.length === 0) return;
 
-    let isMounted = true;
     const controller = new AbortController();
-
-    async function loadPrices() {
-      setPriceStatus("Actualizando precios...");
-      const response = await fetch(`/api/prices?cards=${encodeURIComponent(pricedCardNumbers.slice(0, 120).join(","))}`, {
-        signal: controller.signal,
+    const timeoutId = window.setTimeout(() => {
+      refreshPrices(pricedCardNumbers, controller.signal).catch(() => {
+        setPriceStatus("Precios no disponibles");
       });
-      if (!response.ok) {
-        if (isMounted) setPriceStatus("Precios no disponibles");
-        return;
-      }
-
-      const payload = (await response.json()) as { prices?: CardPriceMap; sourceReady?: boolean };
-      if (!isMounted) return;
-
-      setCardPrices((current) => ({ ...current, ...(payload.prices ?? {}) }));
-      setPriceStatus(payload.sourceReady ? "Precios sincronizados" : "Configurar TCGAPI_KEY para actualizar precios");
-    }
-
-    loadPrices().catch(() => {
-      if (isMounted) setPriceStatus("Precios no disponibles");
-    });
+    }, 0);
 
     return () => {
-      isMounted = false;
+      window.clearTimeout(timeoutId);
       controller.abort();
     };
-  }, [pricedCardNumbers]);
+  }, [pricedCardNumbers, refreshPrices]);
 
   async function handleGoogleLogin() {
     setAuthError("");
@@ -706,6 +718,11 @@ export default function Home() {
                     ? `${visibleCards.length} resultados de ${cards.length} cartas`
                     : `${visibleCards.length} resultados en tu colección`}
                 </p>
+                {view === "collection" && (
+                  <p className="mt-1 text-xs font-semibold text-[#127d84]">
+                    Precios: {pricedVisibleCards}/{visibleCards.length} cargados · {priceStatus}
+                  </p>
+                )}
               </div>
               <Filters
                 query={view === "collection" ? collectionQuery : query}
@@ -721,6 +738,20 @@ export default function Home() {
                 sets={sets}
               />
             </div>
+
+            {view === "collection" && (
+              <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-[#c9d2cd] bg-white/70 p-3">
+                <p className="text-sm text-[#60706d]">Los precios se guardan localmente y se actualizan desde tcgapi.dev.</p>
+                <button
+                  className="skeuo-button flex items-center gap-2 rounded-md px-3 py-2 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-45"
+                  onClick={() => refreshPrices(visibleCards.map((card) => card.cardNumber))}
+                  disabled={visibleCards.length === 0}
+                >
+                  <Zap size={16} />
+                  Actualizar precios
+                </button>
+              </div>
+            )}
 
             <CollectionScanner
               cardsByNumber={cardsByNumber}
