@@ -29,6 +29,7 @@ import {
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { User as SupabaseUser } from "@supabase/supabase-js";
 import type { CardPriceMap, CollectionMap, Deck, DigimonCard, UserProfile } from "@/lib/types";
+import { bannedCardNumbers, bannedPairGroups, deckRestrictionSource, restrictedToOneCardNumbers } from "@/lib/data/deck-restrictions";
 import { createClient } from "@/utils/supabase/client";
 
 type View = "dashboard" | "catalog" | "collection" | "decks";
@@ -928,6 +929,7 @@ export default function Home() {
                     coverCard={getDeckCoverCard(activeDeck, activeDeckCards.all, cardsByNumber)}
                     stats={getDeckStats(activeDeck, ownedByCardNumber, cardsByNumber)}
                     priceStats={getDeckPriceStats(activeDeck, ownedByCardNumber, cardPrices)}
+                    restrictionIssues={getDeckRestrictionIssues(activeDeck.cards)}
                     isEditing={deckMode === "edit"}
                     onDescriptionChange={(description) => updateDeckDetails(activeDeck.id, { description })}
                     onPublicChange={(isPublic) => updateDeckDetails(activeDeck.id, { isPublic })}
@@ -1845,6 +1847,7 @@ function DeckEditorHeader({
   coverCard,
   stats,
   priceStats,
+  restrictionIssues,
   isEditing,
   onDescriptionChange,
   onPublicChange,
@@ -1854,6 +1857,7 @@ function DeckEditorHeader({
   coverCard?: DigimonCard;
   stats: ReturnType<typeof getDeckStats>;
   priceStats: ReturnType<typeof getDeckPriceStats>;
+  restrictionIssues: string[];
   isEditing: boolean;
   onDescriptionChange: (description: string) => void;
   onPublicChange: (isPublic: boolean) => void;
@@ -1928,6 +1932,21 @@ function DeckEditorHeader({
             {deck.description || "Sin descripción."}
           </p>
         )}
+      <div className="mt-3 rounded-md border border-[#c9d2cd] bg-white/70 p-3 text-sm">
+        <p className="font-semibold text-[#127d84]">
+          Reglas oficiales activas: {deckRestrictionSource.effectiveAt}
+        </p>
+        <p className="mt-1 text-[#60706d]">
+          Prohibidas, restringidas a 1 y pares prohibidos se aplican al editar e importar.
+        </p>
+        {restrictionIssues.length > 0 && (
+          <ul className="mt-2 space-y-1 font-semibold text-[#b14d19]">
+            {restrictionIssues.map((issue) => (
+              <li key={issue}>{issue}</li>
+            ))}
+          </ul>
+        )}
+      </div>
       <div className="mt-4 grid gap-2 sm:grid-cols-3">
         <Metric label="Cartas distintas" value={deck.cards.length.toString()} detail="en la lista" />
         <Metric label="Faltan distintas" value={stats.missingDistinct.toString()} detail="cartas no completas" />
@@ -2454,6 +2473,7 @@ function getAllowedDeckQuantity(deck: Deck, cardNumber: string, requestedQuantit
   const normalizedCardNumber = normalizeCardNumber(cardNumber);
   const card = cardsByNumber.get(normalizedCardNumber);
   const cardLimit = getCardDeckLimit(card);
+  const bannedPairConflict = getBannedPairConflict(deck.cards, normalizedCardNumber);
   const sharedLimit = getSharedDeckLimit(card, cardsByNumber);
   const existingQuantity =
     deck.cards.find((deckCard) => normalizeCardNumber(deckCard.cardNumber ?? deckCard.cardId) === normalizedCardNumber)
@@ -2466,7 +2486,7 @@ function getAllowedDeckQuantity(deck: Deck, cardNumber: string, requestedQuantit
     ? Math.max(sharedLimit.max - getSharedDeckGroupCount(deck.cards, sharedLimit.cardNumbers, normalizedCardNumber), 0)
     : cardLimit;
 
-  return Math.min(Math.max(requestedQuantity, 0), cardLimit, availableForCard, availableForSharedGroup);
+  return Math.min(Math.max(requestedQuantity, 0), bannedPairConflict ? 0 : cardLimit, availableForCard, availableForSharedGroup);
 }
 
 function enforceDeckLimits(deckCards: Deck["cards"], cardsByNumber: Map<string, DigimonCard>) {
@@ -2481,6 +2501,8 @@ function enforceDeckLimits(deckCards: Deck["cards"], cardsByNumber: Map<string, 
     const normalizedCardNumber = normalizeCardNumber(cardNumber);
     const card = cardsByNumber.get(normalizedCardNumber);
     const cardLimit = getCardDeckLimit(card);
+    const bannedPairConflict = getBannedPairConflict([...mainCards, ...eggCards], normalizedCardNumber);
+    if (bannedPairConflict || cardLimit <= 0) continue;
     const sharedLimit = getSharedDeckLimit(card, cardsByNumber);
     const sharedGroupKey = sharedLimit ? sharedLimit.cardNumbers.join("|") : "";
     const sharedGroupCount = sharedGroupKey ? sharedGroupCounts.get(sharedGroupKey) ?? 0 : 0;
@@ -2521,15 +2543,94 @@ function getDeckLimitMessages(currentCards: Deck["cards"], importedCards: Deck["
 
   return requested
     .filter((deckCard) => (limitedByNumber.get(normalizeCardNumber(deckCard.cardNumber ?? deckCard.cardId)) ?? 0) < deckCard.quantityRequired)
-    .map((deckCard) => `${deckCard.cardNumber ?? deckCard.cardId} limitado por máximo de deck`);
+    .map((deckCard) => getDeckLimitMessage(deckCard.cardNumber ?? deckCard.cardId, cardsByNumber));
+}
+
+function getDeckRestrictionIssues(deckCards: Deck["cards"]) {
+  const issues: string[] = [];
+  const quantities = new Map<string, number>();
+
+  for (const deckCard of deckCards) {
+    const cardNumber = normalizeCardNumber(deckCard.cardNumber ?? deckCard.cardId);
+    quantities.set(cardNumber, (quantities.get(cardNumber) ?? 0) + deckCard.quantityRequired);
+  }
+
+  for (const [cardNumber, quantity] of quantities) {
+    if (isBannedCard(cardNumber) && quantity > 0) {
+      issues.push(`${cardNumber}: carta prohibida`);
+    } else if (isRestrictedToOneCard(cardNumber) && quantity > 1) {
+      issues.push(`${cardNumber}: mÃ¡ximo 1 copia`);
+    }
+  }
+
+  for (const pair of bannedPairGroups) {
+    const groupA = pair.a.map(normalizeCardNumber);
+    const groupB = pair.b.map(normalizeCardNumber);
+    const deckHasA = groupA.some((cardNumber) => (quantities.get(cardNumber) ?? 0) > 0);
+    const deckHasB = groupB.some((cardNumber) => (quantities.get(cardNumber) ?? 0) > 0);
+
+    if (deckHasA && deckHasB) {
+      issues.push(`Par prohibido: ${groupA.join(", ")} + ${groupB.join(", ")}`);
+    }
+  }
+
+  return issues;
 }
 
 function getCardDeckLimit(card: DigimonCard | undefined) {
+  const cardNumber = normalizeCardNumber(card?.cardNumber ?? "");
+  if (isBannedCard(cardNumber)) return 0;
+  if (isRestrictedToOneCard(cardNumber)) return 1;
+
   const effect = card?.effect ?? "";
   const explicitLimit = effect.match(/include up to\s+(\d+)\s+copies/i);
   if (explicitLimit?.[1]) return Number(explicitLimit[1]);
 
   return maxDeckQuantity;
+}
+
+function getDeckLimitMessage(cardNumber: string, cardsByNumber: Map<string, DigimonCard>) {
+  const normalizedCardNumber = normalizeCardNumber(cardNumber);
+  const card = cardsByNumber.get(normalizedCardNumber);
+
+  if (isBannedCard(normalizedCardNumber)) {
+    return `${normalizedCardNumber} no permitido por lista oficial`;
+  }
+
+  if (isRestrictedToOneCard(normalizedCardNumber)) {
+    return `${normalizedCardNumber} limitado a 1 por lista oficial`;
+  }
+
+  const intrinsicLimit = getCardDeckLimit(card);
+  if (intrinsicLimit !== maxDeckQuantity) {
+    return `${normalizedCardNumber} limitado a ${intrinsicLimit} por regla de carta`;
+  }
+
+  return `${normalizedCardNumber} limitado por máximo de deck`;
+}
+
+function isBannedCard(cardNumber: string) {
+  return bannedCardNumbers.map(normalizeCardNumber).includes(normalizeCardNumber(cardNumber));
+}
+
+function isRestrictedToOneCard(cardNumber: string) {
+  return restrictedToOneCardNumbers.map(normalizeCardNumber).includes(normalizeCardNumber(cardNumber));
+}
+
+function getBannedPairConflict(deckCards: Deck["cards"], requestedCardNumber: string) {
+  const existingNumbers = new Set(deckCards.map((deckCard) => normalizeCardNumber(deckCard.cardNumber ?? deckCard.cardId)));
+  const requested = normalizeCardNumber(requestedCardNumber);
+
+  return bannedPairGroups.some((pair) => {
+    const groupA = pair.a.map(normalizeCardNumber);
+    const groupB = pair.b.map(normalizeCardNumber);
+    const requestedIsA = groupA.includes(requested);
+    const requestedIsB = groupB.includes(requested);
+    const deckHasA = groupA.some((cardNumber) => existingNumbers.has(cardNumber));
+    const deckHasB = groupB.some((cardNumber) => existingNumbers.has(cardNumber));
+
+    return (requestedIsA && deckHasB) || (requestedIsB && deckHasA);
+  });
 }
 
 function getSharedDeckLimit(card: DigimonCard | undefined, cardsByNumber: Map<string, DigimonCard>) {
