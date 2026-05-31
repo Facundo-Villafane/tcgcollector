@@ -28,7 +28,7 @@ import {
 } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import type { User as SupabaseUser } from "@supabase/supabase-js";
-import type { CollectionMap, Deck, DigimonCard, UserProfile } from "@/lib/types";
+import type { CardPriceMap, CollectionMap, Deck, DigimonCard, UserProfile } from "@/lib/types";
 import { createClient } from "@/utils/supabase/client";
 
 type View = "dashboard" | "catalog" | "collection" | "decks";
@@ -40,13 +40,15 @@ const STORAGE_KEYS = {
 };
 
 const maxDeckQuantity = 4;
-const quantityOptions = Array.from({ length: maxDeckQuantity + 1 }, (_value, index) => index);
+const maxMainDeckCards = 50;
+const maxEggDeckCards = 5;
 
 type DeckImportResult = {
   importedLines: number;
   importedCopies: number;
   notFound: string[];
   ignored: string[];
+  limited: string[];
 };
 
 type DeckRow = {
@@ -89,8 +91,10 @@ export default function Home() {
   const [isCreatingDeck, setIsCreatingDeck] = useState(false);
   const [newDeckName, setNewDeckName] = useState("");
   const [selectedCard, setSelectedCard] = useState<DigimonCard | null>(null);
-  const [selectedCardOwnedOverride, setSelectedCardOwnedOverride] = useState<number | null>(null);
+  const [selectedCardPlayableNumber, setSelectedCardPlayableNumber] = useState<string | null>(null);
   const [showDeckImages, setShowDeckImages] = useState(true);
+  const [cardPrices, setCardPrices] = useState<CardPriceMap>({});
+  const [priceStatus, setPriceStatus] = useState("Precios pendientes");
 
   useEffect(() => {
     queueMicrotask(() => {
@@ -222,12 +226,55 @@ export default function Home() {
     () => decks.map((deck) => getDeckStats(deck, ownedByCardNumber, cardsByNumber)),
     [decks, ownedByCardNumber, cardsByNumber],
   );
+  const deckPriceStats = useMemo(
+    () => decks.map((deck) => getDeckPriceStats(deck, ownedByCardNumber, cardPrices)),
+    [decks, ownedByCardNumber, cardPrices],
+  );
   const activeDeckCards = useMemo(
     () => splitDeckCards(activeDeck, cardsByNumber),
     [activeDeck, cardsByNumber],
   );
+  const pricedCardNumbers = useMemo(
+    () => getPricedCardNumbers(decks, publicDecks, collectionCards),
+    [collectionCards, decks, publicDecks],
+  );
   const totalMissingCopies = deckStats.reduce((sum, stat) => sum + stat.missingCopies, 0);
   const ownedCopies = Object.values(collection).reduce((sum, quantity) => sum + quantity, 0);
+  const totalMissingValue = deckPriceStats.reduce((sum, stat) => sum + stat.missingValue, 0);
+  const collectionValue = getCollectionValue(collection, cardsById, cardPrices);
+
+  useEffect(() => {
+    if (pricedCardNumbers.length === 0) return;
+
+    let isMounted = true;
+    const controller = new AbortController();
+
+    async function loadPrices() {
+      setPriceStatus("Actualizando precios...");
+      const response = await fetch(`/api/prices?cards=${encodeURIComponent(pricedCardNumbers.slice(0, 120).join(","))}`, {
+        signal: controller.signal,
+      });
+      if (!response.ok) {
+        if (isMounted) setPriceStatus("Precios no disponibles");
+        return;
+      }
+
+      const payload = (await response.json()) as { prices?: CardPriceMap; sourceReady?: boolean };
+      if (!isMounted) return;
+
+      setCardPrices((current) => ({ ...current, ...(payload.prices ?? {}) }));
+      setPriceStatus(payload.sourceReady ? "Precios sincronizados" : "Configurar TCGAPI_KEY para actualizar precios");
+    }
+
+    loadPrices().catch(() => {
+      if (isMounted) setPriceStatus("Precios no disponibles");
+    });
+
+    return () => {
+      isMounted = false;
+      controller.abort();
+    };
+  }, [pricedCardNumbers]);
 
   async function handleGoogleLogin() {
     setAuthError("");
@@ -430,6 +477,14 @@ export default function Home() {
     setOwnedQuantity(card.id, (collection[card.id] ?? 0) + 1);
   }
 
+  function setPlayableOwnedQuantity(card: DigimonCard, quantity: number) {
+    const playableNumber = normalizeCardNumber(card.cardNumber);
+    const regularOwned = collection[card.id] ?? 0;
+    const totalOwned = ownedByCardNumber[playableNumber] ?? 0;
+    const ownedFromOtherVariants = Math.max(totalOwned - regularOwned, 0);
+    setOwnedQuantity(card.id, Math.max(quantity - ownedFromOtherVariants, 0));
+  }
+
   function createDeck(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!user) return;
@@ -462,21 +517,22 @@ export default function Home() {
         if (deck.id !== deckId) return deck;
 
         const normalizedCardNumber = normalizeCardNumber(cardNumber);
+        const limitedQuantity = getAllowedDeckQuantity(deck, cardNumber, quantityRequired, cardsByNumber);
         const existing = deck.cards.find(
           (deckCard) => normalizeCardNumber(deckCard.cardNumber ?? deckCard.cardId) === normalizedCardNumber,
         );
         const nextCards =
-          quantityRequired <= 0
+          limitedQuantity <= 0
             ? deck.cards.filter(
                 (deckCard) => normalizeCardNumber(deckCard.cardNumber ?? deckCard.cardId) !== normalizedCardNumber,
               )
             : existing
               ? deck.cards.map((deckCard) =>
                   normalizeCardNumber(deckCard.cardNumber ?? deckCard.cardId) === normalizedCardNumber
-                    ? { ...deckCard, cardNumber, cardId: cardNumber, quantityRequired }
+                    ? { ...deckCard, cardNumber, cardId: cardNumber, quantityRequired: limitedQuantity }
                     : deckCard,
                 )
-              : [...deck.cards, { cardNumber, cardId: cardNumber, quantityRequired }];
+              : [...deck.cards, { cardNumber, cardId: cardNumber, quantityRequired: limitedQuantity }];
 
         return { ...deck, cards: nextCards, updatedAt: new Date().toISOString() };
       }),
@@ -485,6 +541,8 @@ export default function Home() {
 
   function importDeckList(deckId: string, text: string): DeckImportResult {
     const parsed = parseDeckList(text, cardsByNumber);
+    const targetDeck = decks.find((deck) => deck.id === deckId);
+    const limited = targetDeck ? getDeckLimitMessages(targetDeck.cards, parsed.cards, cardsByNumber) : [];
 
     if (parsed.cards.length > 0) {
       setDecks((current) =>
@@ -499,13 +557,18 @@ export default function Home() {
             quantities.set(deckCard.cardNumber, deckCard.quantityRequired);
           }
 
-          return {
-            ...deck,
-            cards: Array.from(quantities.entries()).map(([cardNumber, quantityRequired]) => ({
+          const limitedCards = enforceDeckLimits(
+            Array.from(quantities.entries()).map(([cardNumber, quantityRequired]) => ({
               cardNumber,
               cardId: cardNumber,
               quantityRequired,
             })),
+            cardsByNumber,
+          );
+
+          return {
+            ...deck,
+            cards: limitedCards,
             updatedAt: new Date().toISOString(),
           };
         }),
@@ -517,6 +580,7 @@ export default function Home() {
       importedCopies: parsed.cards.reduce((sum, deckCard) => sum + deckCard.quantityRequired, 0),
       notFound: parsed.notFound,
       ignored: parsed.ignored,
+      limited,
     };
   }
 
@@ -578,10 +642,11 @@ export default function Home() {
               <h1 className="mt-1 text-2xl font-bold sm:text-3xl">Colección, decks y comunidad.</h1>
             </div>
 
-            {user && <div className="grid gap-3 sm:grid-cols-3">
+            {user && <div className="grid gap-3 sm:grid-cols-4">
               <Metric label="Cartas registradas" value={collectionCards.length.toString()} detail={`${ownedCopies} copias`} />
               <Metric label="Mis decks" value={decks.length.toString()} detail="listas creadas" />
-              <Metric label="Copias faltantes" value={totalMissingCopies.toString()} detail="para completar decks" />
+              <Metric label="Copias faltantes" value={totalMissingCopies.toString()} detail={`${formatMoney(totalMissingValue)} estimado`} />
+              <Metric label="Valor estimado" value={formatMoney(collectionValue)} detail={priceStatus} />
             </div>}
 
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -600,7 +665,7 @@ export default function Home() {
 
             {authError && <p className="text-sm font-semibold text-[#d9534f]">{authError}</p>}
 
-            <LatestDecks decks={publicDecks} cardsByNumber={cardsByNumber} />
+            <LatestDecks decks={publicDecks} cardsByNumber={cardsByNumber} cardPrices={cardPrices} />
               {user && <DeckSummary decks={decks} stats={deckStats} onOpen={(id) => { setActiveDeckId(id); setView("decks"); }} />}
           </section>
         )}
@@ -645,7 +710,7 @@ export default function Home() {
                     card={card}
                     owned={collection[card.id] ?? 0}
                     onOpen={() => {
-                      setSelectedCardOwnedOverride(null);
+                      setSelectedCardPlayableNumber(null);
                       setSelectedCard(card);
                     }}
                     onSetOwned={(quantity) => setOwnedQuantity(card.id, quantity)}
@@ -703,6 +768,7 @@ export default function Home() {
                 {decks.length === 0 && <EmptyState title="Sin decks" detail="Creá tu primer deck para comparar con tu colección." />}
                 {decks.map((deck) => {
                   const stats = getDeckStats(deck, ownedByCardNumber, cardsByNumber);
+                  const priceStats = getDeckPriceStats(deck, ownedByCardNumber, cardPrices);
                   const cover = getDeckCoverCard(deck, splitDeckCards(deck, cardsByNumber).all, cardsByNumber);
                   return (
                     <button
@@ -729,6 +795,9 @@ export default function Home() {
                         <span className="block truncate font-semibold">{deck.name}</span>
                         <span className="mt-1 block text-sm text-[#60706d]">
                           {stats.totalCards} cartas · {stats.missingCopies === 0 ? "Completo" : `${stats.missingCopies} copias faltantes`}
+                        </span>
+                        <span className="mt-1 block text-xs font-semibold text-[#127d84]">
+                          Deck {formatMoney(priceStats.totalValue)} · Faltan {formatMoney(priceStats.missingValue)}
                         </span>
                       </span>
                     </button>
@@ -765,6 +834,7 @@ export default function Home() {
                     deck={activeDeck}
                     coverCard={getDeckCoverCard(activeDeck, activeDeckCards.all, cardsByNumber)}
                     stats={getDeckStats(activeDeck, ownedByCardNumber, cardsByNumber)}
+                    priceStats={getDeckPriceStats(activeDeck, ownedByCardNumber, cardPrices)}
                     isEditing={deckMode === "edit"}
                     onDescriptionChange={(description) => updateDeckDetails(activeDeck.id, { description })}
                     onPublicChange={(isPublic) => updateDeckDetails(activeDeck.id, { isPublic })}
@@ -807,9 +877,11 @@ export default function Home() {
                               title={`Main Deck (${activeDeckCards.mainCount})`}
                               items={activeDeckCards.main}
                               ownedByCardNumber={ownedByCardNumber}
+                              cardPrices={cardPrices}
+                              getMaxQuantity={(cardNumber) => getAllowedDeckQuantity(activeDeck, cardNumber, maxDeckQuantity, cardsByNumber)}
                               onChange={(cardNumber, quantity) => setDeckQuantity(activeDeck.id, cardNumber, quantity)}
                               onOpen={(card) => {
-                                setSelectedCardOwnedOverride(ownedByCardNumber[normalizeCardNumber(card.cardNumber)] ?? 0);
+                                setSelectedCardPlayableNumber(normalizeCardNumber(card.cardNumber));
                                 setSelectedCard(card);
                               }}
                               coverCardNumber={activeDeck.coverCardNumber}
@@ -820,9 +892,11 @@ export default function Home() {
                               title={`Digi-Egg Deck (${activeDeckCards.eggCount})`}
                               items={activeDeckCards.eggs}
                               ownedByCardNumber={ownedByCardNumber}
+                              cardPrices={cardPrices}
+                              getMaxQuantity={(cardNumber) => getAllowedDeckQuantity(activeDeck, cardNumber, maxDeckQuantity, cardsByNumber)}
                               onChange={(cardNumber, quantity) => setDeckQuantity(activeDeck.id, cardNumber, quantity)}
                               onOpen={(card) => {
-                                setSelectedCardOwnedOverride(ownedByCardNumber[normalizeCardNumber(card.cardNumber)] ?? 0);
+                                setSelectedCardPlayableNumber(normalizeCardNumber(card.cardNumber));
                                 setSelectedCard(card);
                               }}
                               coverCardNumber={activeDeck.coverCardNumber}
@@ -834,10 +908,11 @@ export default function Home() {
                           <CompactDeckList
                             groups={activeDeckCards.groups}
                             ownedByCardNumber={ownedByCardNumber}
+                            cardPrices={cardPrices}
                             coverCardNumber={activeDeck.coverCardNumber}
                             isEditing={deckMode === "edit"}
                             onOpen={(card) => {
-                              setSelectedCardOwnedOverride(ownedByCardNumber[normalizeCardNumber(card.cardNumber)] ?? 0);
+                              setSelectedCardPlayableNumber(normalizeCardNumber(card.cardNumber));
                               setSelectedCard(card);
                             }}
                             onSetCover={(cardNumber) => updateDeckDetails(activeDeck.id, { coverCardNumber: cardNumber })}
@@ -853,12 +928,15 @@ export default function Home() {
                           const required =
                             activeDeck.cards.find((deckCard) => (deckCard.cardNumber ?? deckCard.cardId) === card.cardNumber)
                               ?.quantityRequired ?? 0;
+                          const maxQuantity = getAllowedDeckQuantity(activeDeck, card.cardNumber, maxDeckQuantity, cardsByNumber);
                           return (
                             <AddDeckCardTile
                               key={card.id}
                               card={card}
                               required={required}
                               owned={ownedByCardNumber[normalizeCardNumber(card.cardNumber)] ?? 0}
+                              price={cardPrices[normalizeCardNumber(card.cardNumber)]?.marketPrice ?? null}
+                              maxQuantity={maxQuantity}
                               onChange={(quantity) => setDeckQuantity(activeDeck.id, card.cardNumber, quantity)}
                             />
                           );
@@ -901,13 +979,16 @@ export default function Home() {
       {selectedCard && (
         <CardDetail
           card={selectedCard}
-          owned={selectedCardOwnedOverride ?? collection[selectedCard.id] ?? 0}
+          owned={selectedCardPlayableNumber ? ownedByCardNumber[selectedCardPlayableNumber] ?? 0 : collection[selectedCard.id] ?? 0}
+          price={cardPrices[normalizeCardNumber(selectedCard.cardNumber)]?.marketPrice ?? null}
           onClose={() => {
             setSelectedCard(null);
-            setSelectedCardOwnedOverride(null);
+            setSelectedCardPlayableNumber(null);
           }}
           onSetOwned={(quantity) => {
-            if (selectedCardOwnedOverride === null) {
+            if (selectedCardPlayableNumber) {
+              setPlayableOwnedQuantity(selectedCard, quantity);
+            } else {
               setOwnedQuantity(selectedCard.id, quantity);
             }
           }}
@@ -987,7 +1068,7 @@ function ActionButton({ icon, label, onClick }: { icon: React.ReactNode; label: 
   );
 }
 
-function LatestDecks({ decks, cardsByNumber }: { decks: Deck[]; cardsByNumber: Map<string, DigimonCard> }) {
+function LatestDecks({ decks, cardsByNumber, cardPrices }: { decks: Deck[]; cardsByNumber: Map<string, DigimonCard>; cardPrices: CardPriceMap }) {
   if (decks.length === 0) {
     return <EmptyState title="Todavía no hay decks públicos" detail="Cuando alguien publique un deck, va a aparecer acá." />;
   }
@@ -1000,6 +1081,7 @@ function LatestDecks({ decks, cardsByNumber }: { decks: Deck[]; cardsByNumber: M
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {decks.map((deck) => {
           const cover = getDeckCoverCard(deck, splitDeckCards(deck, cardsByNumber).all, cardsByNumber);
+          const priceStats = getDeckPriceStats(deck, {}, cardPrices);
           return (
             <a
               key={deck.id}
@@ -1016,7 +1098,7 @@ function LatestDecks({ decks, cardsByNumber }: { decks: Deck[]; cardsByNumber: M
               <span className="rounded bg-black/55 px-2 py-1 text-xs font-bold shadow-sm">{cover?.color[0] ?? "Deck"}</span>
               <div className="absolute bottom-4 left-4 right-4">
                 <h3 className="truncate text-lg font-bold">{deck.name}</h3>
-                <p className="text-xs text-white/80">{deck.viewCount ?? 0} views</p>
+                <p className="text-xs text-white/80">{deck.viewCount ?? 0} views Â· {formatMoney(priceStats.totalValue)}</p>
               </div>
             </a>
           );
@@ -1415,21 +1497,43 @@ function CardTile({ card, owned, onOpen, onSetOwned, onAddToDeck }: { card: Digi
   );
 }
 
-function QuantityStepper({ value, onChange, label }: { value: number; onChange: (value: number) => void; label: string }) {
+function QuantityStepper({
+  value,
+  onChange,
+  label,
+  maxValue = 99,
+}: {
+  value: number;
+  onChange: (value: number) => void;
+  label: string;
+  maxValue?: number;
+}) {
+  const options = Array.from({ length: Math.max(maxValue, value) + 1 }, (_value, index) => index);
+
   return (
     <div className="flex items-center gap-2">
       <span className="text-sm text-[#60706d]">{label}</span>
-      <button className="skeuo-button grid h-8 w-8 place-items-center rounded-md" title="Reducir" onClick={() => onChange(Math.max(value - 1, 0))}>
+      <button
+        className="skeuo-button grid h-8 w-8 place-items-center rounded-md disabled:cursor-not-allowed disabled:opacity-45"
+        title="Reducir"
+        disabled={value <= 0}
+        onClick={() => onChange(Math.max(value - 1, 0))}
+      >
         <Minus size={15} />
       </button>
       <select className="h-8 rounded-md border border-[#b99d76] bg-[#fff9ed] px-2 shadow-inner" value={value} onChange={(event) => onChange(Number(event.target.value))}>
-        {quantityOptions.map((option) => (
+        {options.map((option) => (
           <option key={option} value={option}>
             {option}
           </option>
         ))}
       </select>
-      <button className="skeuo-button grid h-8 w-8 place-items-center rounded-md" title="Aumentar" onClick={() => onChange(value + 1)}>
+      <button
+        className="skeuo-button grid h-8 w-8 place-items-center rounded-md disabled:cursor-not-allowed disabled:opacity-45"
+        title={value >= maxValue ? "Limite alcanzado" : "Aumentar"}
+        disabled={value >= maxValue}
+        onClick={() => onChange(value + 1)}
+      >
         <Plus size={15} />
       </button>
     </div>
@@ -1515,6 +1619,7 @@ function DeckEditorHeader({
   deck,
   coverCard,
   stats,
+  priceStats,
   isEditing,
   onDescriptionChange,
   onPublicChange,
@@ -1523,6 +1628,7 @@ function DeckEditorHeader({
   deck: Deck;
   coverCard?: DigimonCard;
   stats: ReturnType<typeof getDeckStats>;
+  priceStats: ReturnType<typeof getDeckPriceStats>;
   isEditing: boolean;
   onDescriptionChange: (description: string) => void;
   onPublicChange: (isPublic: boolean) => void;
@@ -1601,6 +1707,9 @@ function DeckEditorHeader({
         <Metric label="Cartas distintas" value={deck.cards.length.toString()} detail="en la lista" />
         <Metric label="Faltan distintas" value={stats.missingDistinct.toString()} detail="cartas no completas" />
         <Metric label="Faltan copias" value={stats.missingCopies.toString()} detail="total requerido" />
+        <Metric label="Precio deck" value={formatMoney(priceStats.totalValue)} detail="estimado" />
+        <Metric label="Precio faltantes" value={formatMoney(priceStats.missingValue)} detail="para completar" />
+        <Metric label="Precios cargados" value={priceStats.pricedCards.toString()} detail="cartas distintas" />
       </div>
       </div>
     </div>
@@ -1658,6 +1767,9 @@ function DeckImportPanel({ onImport, disabled }: { onImport: (text: string) => D
           {result.ignored.length > 0 && (
             <p className="mt-2 text-[#60706d]">Ignoradas: {result.ignored.slice(0, 4).join(" | ")}</p>
           )}
+          {result.limited.length > 0 && (
+            <p className="mt-2 text-[#b14d19]">Limitadas: {result.limited.slice(0, 6).join(" | ")}</p>
+          )}
         </div>
       )}
     </form>
@@ -1668,6 +1780,8 @@ function DeckSection({
   title,
   items,
   ownedByCardNumber,
+  cardPrices,
+  getMaxQuantity,
   onChange,
   onOpen,
   coverCardNumber,
@@ -1677,6 +1791,8 @@ function DeckSection({
   title: string;
   items: Array<{ cardNumber: string; card: DigimonCard; quantityRequired: number }>;
   ownedByCardNumber: CollectionMap;
+  cardPrices: CardPriceMap;
+  getMaxQuantity: (cardNumber: string) => number;
   onChange: (cardNumber: string, quantity: number) => void;
   onOpen: (card: DigimonCard) => void;
   coverCardNumber?: string;
@@ -1695,6 +1811,8 @@ function DeckSection({
             card={item.card}
             required={item.quantityRequired}
             owned={ownedByCardNumber[normalizeCardNumber(item.cardNumber)] ?? 0}
+            price={cardPrices[normalizeCardNumber(item.cardNumber)]?.marketPrice ?? null}
+            maxQuantity={getMaxQuantity(item.cardNumber)}
             onOpen={() => onOpen(item.card)}
             onChange={(quantity) => onChange(item.cardNumber, quantity)}
             isCover={normalizeCardNumber(coverCardNumber ?? "") === normalizeCardNumber(item.cardNumber)}
@@ -1711,6 +1829,8 @@ function DeckCardRow({
   card,
   required,
   owned,
+  price,
+  maxQuantity,
   onOpen,
   onChange,
   isCover,
@@ -1720,6 +1840,8 @@ function DeckCardRow({
   card: DigimonCard;
   required: number;
   owned: number;
+  price: number | null;
+  maxQuantity: number;
   onOpen: () => void;
   onChange: (quantity: number) => void;
   isCover: boolean;
@@ -1743,6 +1865,11 @@ function DeckCardRow({
         <p className="text-sm text-[#60706d]">
           {card.cardNumber} · Necesito {required} · Tengo {owned}
         </p>
+        {price !== null && (
+          <p className="mt-1 text-xs font-semibold text-[#1d5fa8]">
+            {formatMoney(price)} c/u · {formatMoney(price * required)} deck
+          </p>
+        )}
         <p className={`mt-1 flex items-center gap-1 text-sm font-semibold ${missing === 0 ? "text-[#187a45]" : "text-[#b14d19]"}`}>
           {missing === 0 ? <CheckCircle2 size={15} /> : <ChevronLeft size={15} />}
           {missing === 0 ? "Completa" : `Falta ${missing}`}
@@ -1757,7 +1884,7 @@ function DeckCardRow({
           >
             <Crown size={16} />
           </button>
-          <QuantityStepper value={required} onChange={onChange} label="Deck" />
+          <QuantityStepper value={required} onChange={onChange} label="Deck" maxValue={maxQuantity} />
         </div>
       )}
     </article>
@@ -1767,6 +1894,7 @@ function DeckCardRow({
 function CompactDeckList({
   groups,
   ownedByCardNumber,
+  cardPrices,
   coverCardNumber,
   isEditing,
   onOpen,
@@ -1774,6 +1902,7 @@ function CompactDeckList({
 }: {
   groups: Array<{ title: string; items: Array<{ cardNumber: string; card: DigimonCard; quantityRequired: number }> }>;
   ownedByCardNumber: CollectionMap;
+  cardPrices: CardPriceMap;
   coverCardNumber?: string;
   isEditing: boolean;
   onOpen: (card: DigimonCard) => void;
@@ -1792,6 +1921,7 @@ function CompactDeckList({
                 key={item.cardNumber}
                 item={item}
                 owned={ownedByCardNumber[normalizeCardNumber(item.cardNumber)] ?? 0}
+                price={cardPrices[normalizeCardNumber(item.cardNumber)]?.marketPrice ?? null}
                 isCover={normalizeCardNumber(coverCardNumber ?? "") === normalizeCardNumber(item.cardNumber)}
                 isEditing={isEditing}
                 onOpen={() => onOpen(item.card)}
@@ -1808,6 +1938,7 @@ function CompactDeckList({
 function CompactDeckRow({
   item,
   owned,
+  price,
   isCover,
   isEditing,
   onOpen,
@@ -1815,6 +1946,7 @@ function CompactDeckRow({
 }: {
   item: { cardNumber: string; card: DigimonCard; quantityRequired: number };
   owned: number;
+  price: number | null;
   isCover: boolean;
   isEditing: boolean;
   onOpen: () => void;
@@ -1823,13 +1955,14 @@ function CompactDeckRow({
   const missing = Math.max(item.quantityRequired - owned, 0);
 
   return (
-    <div className="grid grid-cols-[24px_minmax(0,1fr)_auto_auto] items-center gap-2 rounded px-1 py-1 text-sm hover:bg-[#dfe7ea]">
+    <div className="grid grid-cols-[24px_minmax(0,1fr)_auto_auto_auto] items-center gap-2 rounded px-1 py-1 text-sm hover:bg-[#dfe7ea]">
       <span className="font-semibold text-[#1d5fa8]">{item.quantityRequired}</span>
       <button className="truncate text-left font-semibold" onClick={onOpen}>
         {item.card.name}
         <span className="ml-1 text-[10px] font-normal text-[#60706d]">{item.card.cardNumber}</span>
       </button>
       <span className={`h-2.5 w-2.5 rounded-full ${missing === 0 ? "bg-[#187a45]" : "bg-[#d9534f]"}`} title={missing === 0 ? "Completa" : `Falta ${missing}`} />
+      {price !== null && <span className="text-xs font-semibold text-[#1d5fa8]">{formatMoney(price)}</span>}
       {isEditing ? (
         <button
           className={`grid h-7 w-7 place-items-center rounded ${isCover ? "bg-[#f4c430] text-[#1b2424]" : "text-[#60706d] hover:bg-white"}`}
@@ -1845,9 +1978,25 @@ function CompactDeckRow({
   );
 }
 
-function AddDeckCardTile({ card, required, owned, onChange }: { card: DigimonCard; required: number; owned: number; onChange: (quantity: number) => void }) {
+function AddDeckCardTile({
+  card,
+  required,
+  owned,
+  price,
+  maxQuantity,
+  onChange,
+}: {
+  card: DigimonCard;
+  required: number;
+  owned: number;
+  price: number | null;
+  maxQuantity: number;
+  onChange: (quantity: number) => void;
+}) {
+  const isBlocked = maxQuantity <= 0 && required <= 0;
+
   return (
-    <article className="skeuo-card grid grid-cols-[64px_1fr] gap-3 rounded-md p-3">
+    <article className={`skeuo-card grid grid-cols-[64px_1fr] gap-3 rounded-md p-3 ${isBlocked ? "opacity-60" : ""}`}>
       <div className="card-sleeve rounded-md p-1">
         <img className="aspect-[5/7] rounded object-cover" src={card.imageUrl} alt={card.name} loading="lazy" />
       </div>
@@ -1856,9 +2005,11 @@ function AddDeckCardTile({ card, required, owned, onChange }: { card: DigimonCar
         <p className="text-sm text-[#60706d]">
           {card.cardNumber} · Tengo {owned}
         </p>
+        {price !== null && <p className="mt-1 text-xs font-semibold text-[#1d5fa8]">{formatMoney(price)}</p>}
         <div className="mt-2">
-          <QuantityStepper value={required} onChange={onChange} label="Deck" />
+          <QuantityStepper value={required} onChange={onChange} label="Deck" maxValue={maxQuantity} />
         </div>
+        {isBlocked && <p className="mt-1 text-xs font-semibold text-[#b14d19]">Limite del deck alcanzado</p>}
       </div>
     </article>
   );
@@ -1867,11 +2018,13 @@ function AddDeckCardTile({ card, required, owned, onChange }: { card: DigimonCar
 function CardDetail({
   card,
   owned,
+  price,
   onClose,
   onSetOwned,
 }: {
   card: DigimonCard;
   owned: number;
+  price: number | null;
   onClose: () => void;
   onSetOwned: (quantity: number) => void;
 }) {
@@ -1903,6 +2056,7 @@ function CardDetail({
             <Info label="Rareza" value={card.rarity.toUpperCase()} />
             <Info label="Costo" value={card.playCost?.toString() ?? "-"} />
             <Info label="DP" value={card.dp?.toString() ?? "-"} />
+            <Info label="Precio estimado" value={price === null ? "Pendiente" : formatMoney(price)} />
             <div>
               <p className="text-sm font-semibold text-[#60706d]">Cantidad en mi colección</p>
               <div className="mt-2">
@@ -1967,6 +2121,55 @@ function EmptyState({ title, detail }: { title: string; detail: string }) {
   );
 }
 
+function getDeckPriceStats(deck: Deck, ownedByCardNumber: CollectionMap, cardPrices: CardPriceMap) {
+  return deck.cards.reduce(
+    (stats, deckCard) => {
+      const cardNumber = normalizeCardNumber(deckCard.cardNumber ?? deckCard.cardId);
+      const unitPrice = cardPrices[cardNumber]?.marketPrice ?? null;
+      if (unitPrice === null) return stats;
+
+      const owned = ownedByCardNumber[cardNumber] ?? 0;
+      const missing = Math.max(deckCard.quantityRequired - owned, 0);
+
+      return {
+        totalValue: stats.totalValue + unitPrice * deckCard.quantityRequired,
+        missingValue: stats.missingValue + unitPrice * missing,
+        pricedCards: stats.pricedCards + 1,
+      };
+    },
+    { totalValue: 0, missingValue: 0, pricedCards: 0 },
+  );
+}
+
+function getCollectionValue(collection: CollectionMap, cardsById: Map<string, DigimonCard>, cardPrices: CardPriceMap) {
+  return Object.entries(collection).reduce((sum, [cardId, quantity]) => {
+    const card = cardsById.get(cardId);
+    const cardNumber = normalizeCardNumber(card?.cardNumber ?? cardId);
+    return sum + (cardPrices[cardNumber]?.marketPrice ?? 0) * quantity;
+  }, 0);
+}
+
+function getPricedCardNumbers(decks: Deck[], publicDecks: Deck[], collectionCards: DigimonCard[]) {
+  const cardNumbers = new Set<string>();
+
+  for (const card of collectionCards) {
+    cardNumbers.add(normalizeCardNumber(card.cardNumber));
+  }
+
+  for (const deck of [...decks, ...publicDecks]) {
+    for (const deckCard of deck.cards) {
+      cardNumbers.add(normalizeCardNumber(deckCard.cardNumber ?? deckCard.cardId));
+    }
+  }
+
+  return Array.from(cardNumbers).sort();
+}
+
+function formatMoney(value: number | null | undefined, currency = "USD") {
+  if (value === null || value === undefined || !Number.isFinite(value)) return "-";
+  return new Intl.NumberFormat("en-US", { style: "currency", currency }).format(value);
+}
+
 function getDeckStats(deck: Deck, ownedByCardNumber: CollectionMap, cardsByNumber?: Map<string, DigimonCard>) {
   return deck.cards.reduce(
     (stats, deckCard) => {
@@ -1985,6 +2188,73 @@ function getDeckStats(deck: Deck, ownedByCardNumber: CollectionMap, cardsByNumbe
     },
     { totalCards: 0, eggCards: 0, missingDistinct: 0, missingCopies: 0 },
   );
+}
+
+function getAllowedDeckQuantity(deck: Deck, cardNumber: string, requestedQuantity: number, cardsByNumber: Map<string, DigimonCard>) {
+  const normalizedCardNumber = normalizeCardNumber(cardNumber);
+  const existingQuantity =
+    deck.cards.find((deckCard) => normalizeCardNumber(deckCard.cardNumber ?? deckCard.cardId) === normalizedCardNumber)
+      ?.quantityRequired ?? 0;
+  const isEgg = isDigiEggCard(cardNumber, cardsByNumber);
+  const zoneCount = getDeckZoneCount(deck.cards, isEgg, cardsByNumber);
+  const zoneLimit = isEgg ? maxEggDeckCards : maxMainDeckCards;
+  const availableForCard = Math.max(zoneLimit - zoneCount + existingQuantity, 0);
+
+  return Math.min(Math.max(requestedQuantity, 0), maxDeckQuantity, availableForCard);
+}
+
+function enforceDeckLimits(deckCards: Deck["cards"], cardsByNumber: Map<string, DigimonCard>) {
+  const mainCards: Deck["cards"] = [];
+  const eggCards: Deck["cards"] = [];
+  let mainCount = 0;
+  let eggCount = 0;
+
+  for (const deckCard of deckCards) {
+    const isEgg = isDigiEggCard(deckCard.cardNumber ?? deckCard.cardId, cardsByNumber);
+    const zoneLimit = isEgg ? maxEggDeckCards : maxMainDeckCards;
+    const zoneCount = isEgg ? eggCount : mainCount;
+    const allowedQuantity = Math.min(deckCard.quantityRequired, maxDeckQuantity, Math.max(zoneLimit - zoneCount, 0));
+    if (allowedQuantity <= 0) continue;
+
+    const nextCard = { ...deckCard, quantityRequired: allowedQuantity };
+    if (isEgg) {
+      eggCards.push(nextCard);
+      eggCount += allowedQuantity;
+    } else {
+      mainCards.push(nextCard);
+      mainCount += allowedQuantity;
+    }
+  }
+
+  return [...mainCards, ...eggCards];
+}
+
+function getDeckLimitMessages(currentCards: Deck["cards"], importedCards: Deck["cards"], cardsByNumber: Map<string, DigimonCard>) {
+  const before = enforceDeckLimits(currentCards, cardsByNumber);
+  const merged = new Map(before.map((deckCard) => [normalizeCardNumber(deckCard.cardNumber ?? deckCard.cardId), deckCard]));
+
+  for (const importedCard of importedCards) {
+    merged.set(normalizeCardNumber(importedCard.cardNumber ?? importedCard.cardId), importedCard);
+  }
+
+  const requested = Array.from(merged.values());
+  const limited = enforceDeckLimits(requested, cardsByNumber);
+  const limitedByNumber = new Map(limited.map((deckCard) => [normalizeCardNumber(deckCard.cardNumber ?? deckCard.cardId), deckCard.quantityRequired]));
+
+  return requested
+    .filter((deckCard) => (limitedByNumber.get(normalizeCardNumber(deckCard.cardNumber ?? deckCard.cardId)) ?? 0) < deckCard.quantityRequired)
+    .map((deckCard) => `${deckCard.cardNumber ?? deckCard.cardId} limitado por máximo de deck`);
+}
+
+function getDeckZoneCount(deckCards: Deck["cards"], isEggZone: boolean, cardsByNumber: Map<string, DigimonCard>) {
+  return deckCards.reduce((sum, deckCard) => {
+    const isEgg = isDigiEggCard(deckCard.cardNumber ?? deckCard.cardId, cardsByNumber);
+    return isEgg === isEggZone ? sum + deckCard.quantityRequired : sum;
+  }, 0);
+}
+
+function isDigiEggCard(cardNumber: string, cardsByNumber: Map<string, DigimonCard>) {
+  return cardsByNumber.get(normalizeCardNumber(cardNumber))?.type === "Digi-Egg";
 }
 
 function parseDeckList(text: string, cardsByNumber: Map<string, DigimonCard>) {

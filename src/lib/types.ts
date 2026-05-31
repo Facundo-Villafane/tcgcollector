@@ -48,3 +48,15 @@ export type Deck = {
   updatedAt: string;
   cards: DeckCard[];
 };
+
+export type CardPrice = {
+  cardNumber: string;
+  source: string;
+  marketPrice: number | null;
+  lowPrice?: number | null;
+  currency: string;
+  priceUrl?: string | null;
+  fetchedAt: string;
+};
+
+export type CardPriceMap = Record<string, CardPrice>;

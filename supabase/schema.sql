@@ -32,10 +32,22 @@ create table if not exists public.deck_likes (
   primary key (deck_id, user_id)
 );
 
+create table if not exists public.card_prices (
+  card_number text primary key,
+  source text not null default 'manual',
+  market_price numeric(10, 2),
+  low_price numeric(10, 2),
+  currency text not null default 'USD',
+  price_url text,
+  fetched_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
 alter table public.user_collection enable row level security;
 alter table public.decks enable row level security;
 alter table public.deck_cards enable row level security;
 alter table public.deck_likes enable row level security;
+alter table public.card_prices enable row level security;
 
 drop policy if exists "Users can manage their collection" on public.user_collection;
 create policy "Users can manage their collection"
@@ -124,6 +136,12 @@ create policy "Users can unlike as themselves"
 on public.deck_likes
 for delete
 using (auth.uid() = user_id);
+
+drop policy if exists "Anyone can read card prices" on public.card_prices;
+create policy "Anyone can read card prices"
+on public.card_prices
+for select
+using (true);
 
 create or replace function public.increment_deck_view(deck_id_arg uuid)
 returns void

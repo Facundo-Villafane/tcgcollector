@@ -4,7 +4,8 @@ import Link from "next/link";
 import { Archive, Eye, Heart } from "lucide-react";
 import { createClient } from "@/utils/supabase/server";
 import { getDigimonCards } from "@/lib/api/digimon-card-client";
-import type { Deck, DigimonCard } from "@/lib/types";
+import { getCardPrices } from "@/lib/api/price-client";
+import type { CardPriceMap, Deck, DigimonCard } from "@/lib/types";
 import { PublicDeckActions } from "./PublicDeckActions";
 
 type PageProps = {
@@ -61,6 +62,8 @@ export default async function PublicDeckPage({ params }: PageProps) {
   const cover = getDeckCover(deck, cardsByNumber);
   const groups = groupDeckCards(deck, cardsByNumber);
   const latestDecks = ((latestRows ?? []) as DeckRow[]).map(fromDeckRow);
+  const { prices: cardPrices } = await getCardPrices(getDeckCardNumbers([deck, ...latestDecks]));
+  const priceStats = getDeckPriceStats(deck, cardPrices);
 
   return (
     <main className="min-h-screen pb-10 text-[#1b2424]">
@@ -96,6 +99,7 @@ export default async function PublicDeckPage({ params }: PageProps) {
           <div className="mt-3 flex flex-wrap gap-3 text-sm text-white/85">
             <span className="flex items-center gap-1"><Eye size={16} /> {(deck.viewCount ?? 0) + (isOwner ? 0 : 1)} views</span>
             <span className="flex items-center gap-1"><Heart size={16} /> {likeCount ?? 0} likes</span>
+            <span>{formatMoney(priceStats.totalValue)} estimado</span>
             <span>{deck.isPublic ? "Público" : "Privado"}</span>
           </div>
         </div>
@@ -115,12 +119,13 @@ export default async function PublicDeckPage({ params }: PageProps) {
                 {group.title} ({group.items.reduce((sum, item) => sum + item.quantityRequired, 0)})
               </h2>
               {group.items.map((item) => (
-                <div key={item.cardNumber} className="grid grid-cols-[24px_minmax(0,1fr)] gap-2 py-1 text-sm">
+                <div key={item.cardNumber} className="grid grid-cols-[24px_minmax(0,1fr)_auto] gap-2 py-1 text-sm">
                   <span className="font-semibold text-[#1d5fa8]">{item.quantityRequired}</span>
                   <span className="truncate font-semibold">
                     {item.card?.name ?? item.cardNumber}
                     <span className="ml-1 text-[10px] font-normal text-[#60706d]">{item.cardNumber}</span>
                   </span>
+                  <span className="text-xs font-semibold text-[#1d5fa8]">{formatMoney(cardPrices[normalizeCardNumber(item.cardNumber)]?.marketPrice)}</span>
                 </div>
               ))}
             </div>
@@ -136,6 +141,7 @@ export default async function PublicDeckPage({ params }: PageProps) {
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               {latestDecks.map((latestDeck) => {
                 const latestCover = getDeckCover(latestDeck, cardsByNumber);
+                const latestPriceStats = getDeckPriceStats(latestDeck, cardPrices);
                 return (
                   <Link
                     key={latestDeck.id}
@@ -152,7 +158,7 @@ export default async function PublicDeckPage({ params }: PageProps) {
                     <span className="rounded bg-black/45 px-2 py-1 text-xs font-bold">{latestCover?.color[0] ?? "Deck"}</span>
                     <div className="absolute bottom-4 left-4 right-4">
                       <h3 className="truncate text-lg font-bold">{latestDeck.name}</h3>
-                      <p className="text-xs text-white/80">{latestDeck.viewCount ?? 0} views</p>
+                      <p className="text-xs text-white/80">{latestDeck.viewCount ?? 0} views · {formatMoney(latestPriceStats.totalValue)}</p>
                     </div>
                   </Link>
                 );
@@ -220,6 +226,35 @@ function getDeckCover(deck: Deck, cardsByNumber: Map<string, DigimonCard>) {
   }
 
   return undefined;
+}
+
+function getDeckCardNumbers(decks: Deck[]) {
+  const cardNumbers = new Set<string>();
+  for (const deck of decks) {
+    for (const deckCard of deck.cards) {
+      cardNumbers.add(normalizeCardNumber(deckCard.cardNumber ?? deckCard.cardId));
+    }
+  }
+
+  return Array.from(cardNumbers);
+}
+
+function getDeckPriceStats(deck: Deck, cardPrices: CardPriceMap) {
+  return deck.cards.reduce(
+    (stats, deckCard) => {
+      const unitPrice = cardPrices[normalizeCardNumber(deckCard.cardNumber ?? deckCard.cardId)]?.marketPrice ?? null;
+      return {
+        totalValue: stats.totalValue + (unitPrice ?? 0) * deckCard.quantityRequired,
+        pricedCards: stats.pricedCards + (unitPrice === null ? 0 : 1),
+      };
+    },
+    { totalValue: 0, pricedCards: 0 },
+  );
+}
+
+function formatMoney(value: number | null | undefined, currency = "USD") {
+  if (value === null || value === undefined || !Number.isFinite(value)) return "-";
+  return new Intl.NumberFormat("en-US", { style: "currency", currency }).format(value);
 }
 
 function normalizeCardNumber(cardNumber: string) {
