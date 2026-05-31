@@ -772,29 +772,42 @@ export default function Home() {
                   <EmptyState title="Sin resultados" detail="Probá con otro nombre, número, set, color o tipo." />
                 ) : (
                   <div className="space-y-3">
-                    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                      {paginatedCards.map((card) => (
-                        <CardTile
-                          key={card.id}
-                          card={card}
-                          owned={collection[card.id] ?? 0}
-                          price={cardPrices[normalizeCardNumber(card.cardNumber)]?.marketPrice ?? null}
-                          onOpen={() => {
-                            setSelectedCardPlayableNumber(null);
-                            setSelectedCard(card);
-                          }}
-                          onSetOwned={(quantity) => setOwnedQuantity(card.id, quantity)}
-                          onAddToDeck={
-                            activeDeck
-                              ? () => {
-                                  setDeckQuantity(activeDeck.id, card.cardNumber, 1);
-                                  setView("decks");
-                                }
-                              : undefined
-                          }
-                        />
-                      ))}
-                    </div>
+                    {view === "collection" ? (
+                      <CollectionSetGroups
+                        cards={paginatedCards}
+                        collection={collection}
+                        cardPrices={cardPrices}
+                        onOpen={(card) => {
+                          setSelectedCardPlayableNumber(null);
+                          setSelectedCard(card);
+                        }}
+                        onSetOwned={setOwnedQuantity}
+                      />
+                    ) : (
+                      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                        {paginatedCards.map((card) => (
+                          <CardTile
+                            key={card.id}
+                            card={card}
+                            owned={collection[card.id] ?? 0}
+                            price={cardPrices[normalizeCardNumber(card.cardNumber)]?.marketPrice ?? null}
+                            onOpen={() => {
+                              setSelectedCardPlayableNumber(null);
+                              setSelectedCard(card);
+                            }}
+                            onSetOwned={(quantity) => setOwnedQuantity(card.id, quantity)}
+                            onAddToDeck={
+                              activeDeck
+                                ? () => {
+                                    setDeckQuantity(activeDeck.id, card.cardNumber, 1);
+                                    setView("decks");
+                                  }
+                                : undefined
+                            }
+                          />
+                        ))}
+                      </div>
+                    )}
                   </div>
                 )}
                 <PaginationControls
@@ -1613,6 +1626,52 @@ function Select({ value, onChange, options }: { value: string; onChange: (value:
   );
 }
 
+function CollectionSetGroups({
+  cards,
+  collection,
+  cardPrices,
+  onOpen,
+  onSetOwned,
+}: {
+  cards: DigimonCard[];
+  collection: CollectionMap;
+  cardPrices: CardPriceMap;
+  onOpen: (card: DigimonCard) => void;
+  onSetOwned: (cardId: string, quantity: number) => void;
+}) {
+  const groups = groupCardsBySet(cards, collection, cardPrices);
+
+  return (
+    <div className="space-y-4">
+      {groups.map((group) => (
+        <section key={group.setCode} className="skeuo-card rounded-md p-3">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2 border-b binder-divider pb-2">
+            <div>
+              <h2 className="text-lg font-bold">{group.setCode}</h2>
+              {group.setName && <p className="text-sm text-[#60706d]">{group.setName}</p>}
+            </div>
+            <p className="text-sm font-semibold text-[#127d84]">
+              {group.distinctCards} cartas · {group.totalCopies} copias · {formatKnownMoney(group.totalValue, group.hasPrice)}
+            </p>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {group.cards.map((card) => (
+              <CardTile
+                key={card.id}
+                card={card}
+                owned={collection[card.id] ?? 0}
+                price={cardPrices[normalizeCardNumber(card.cardNumber)]?.marketPrice ?? null}
+                onOpen={() => onOpen(card)}
+                onSetOwned={(quantity) => onSetOwned(card.id, quantity)}
+              />
+            ))}
+          </div>
+        </section>
+      ))}
+    </div>
+  );
+}
+
 function CardTile({
   card,
   owned,
@@ -2320,6 +2379,47 @@ function getCollectionValue(collection: CollectionMap, cardsById: Map<string, Di
   }, 0);
 }
 
+function groupCardsBySet(cards: DigimonCard[], collection: CollectionMap, cardPrices: CardPriceMap) {
+  const groups = new Map<
+    string,
+    {
+      setCode: string;
+      setName: string;
+      cards: DigimonCard[];
+      distinctCards: number;
+      totalCopies: number;
+      totalValue: number;
+      hasPrice: boolean;
+    }
+  >();
+
+  for (const card of cards) {
+    const setCode = card.setCode || "Otros";
+    const group =
+      groups.get(setCode) ??
+      {
+        setCode,
+        setName: card.setName,
+        cards: [],
+        distinctCards: 0,
+        totalCopies: 0,
+        totalValue: 0,
+        hasPrice: false,
+      };
+    const quantity = collection[card.id] ?? 0;
+    const price = cardPrices[normalizeCardNumber(card.cardNumber)]?.marketPrice;
+
+    group.cards.push(card);
+    group.distinctCards += 1;
+    group.totalCopies += quantity;
+    group.totalValue += (price ?? 0) * quantity;
+    group.hasPrice ||= price !== undefined;
+    groups.set(setCode, group);
+  }
+
+  return Array.from(groups.values()).sort((a, b) => a.setCode.localeCompare(b.setCode, undefined, { numeric: true }));
+}
+
 function formatMoney(value: number | null | undefined, currency = "USD") {
   if (value === null || value === undefined || !Number.isFinite(value)) return "-";
   return new Intl.NumberFormat("en-US", { style: "currency", currency }).format(value);
@@ -2352,6 +2452,9 @@ function getDeckStats(deck: Deck, ownedByCardNumber: CollectionMap, cardsByNumbe
 
 function getAllowedDeckQuantity(deck: Deck, cardNumber: string, requestedQuantity: number, cardsByNumber: Map<string, DigimonCard>) {
   const normalizedCardNumber = normalizeCardNumber(cardNumber);
+  const card = cardsByNumber.get(normalizedCardNumber);
+  const cardLimit = getCardDeckLimit(card);
+  const sharedLimit = getSharedDeckLimit(card, cardsByNumber);
   const existingQuantity =
     deck.cards.find((deckCard) => normalizeCardNumber(deckCard.cardNumber ?? deckCard.cardId) === normalizedCardNumber)
       ?.quantityRequired ?? 0;
@@ -2359,24 +2462,39 @@ function getAllowedDeckQuantity(deck: Deck, cardNumber: string, requestedQuantit
   const zoneCount = getDeckZoneCount(deck.cards, isEgg, cardsByNumber);
   const zoneLimit = isEgg ? maxEggDeckCards : maxMainDeckCards;
   const availableForCard = Math.max(zoneLimit - zoneCount + existingQuantity, 0);
+  const availableForSharedGroup = sharedLimit
+    ? Math.max(sharedLimit.max - getSharedDeckGroupCount(deck.cards, sharedLimit.cardNumbers, normalizedCardNumber), 0)
+    : cardLimit;
 
-  return Math.min(Math.max(requestedQuantity, 0), maxDeckQuantity, availableForCard);
+  return Math.min(Math.max(requestedQuantity, 0), cardLimit, availableForCard, availableForSharedGroup);
 }
 
 function enforceDeckLimits(deckCards: Deck["cards"], cardsByNumber: Map<string, DigimonCard>) {
   const mainCards: Deck["cards"] = [];
   const eggCards: Deck["cards"] = [];
+  const sharedGroupCounts = new Map<string, number>();
   let mainCount = 0;
   let eggCount = 0;
 
   for (const deckCard of deckCards) {
-    const isEgg = isDigiEggCard(deckCard.cardNumber ?? deckCard.cardId, cardsByNumber);
+    const cardNumber = deckCard.cardNumber ?? deckCard.cardId;
+    const normalizedCardNumber = normalizeCardNumber(cardNumber);
+    const card = cardsByNumber.get(normalizedCardNumber);
+    const cardLimit = getCardDeckLimit(card);
+    const sharedLimit = getSharedDeckLimit(card, cardsByNumber);
+    const sharedGroupKey = sharedLimit ? sharedLimit.cardNumbers.join("|") : "";
+    const sharedGroupCount = sharedGroupKey ? sharedGroupCounts.get(sharedGroupKey) ?? 0 : 0;
+    const sharedGroupAvailable = sharedLimit ? Math.max(sharedLimit.max - sharedGroupCount, 0) : cardLimit;
+    const isEgg = isDigiEggCard(cardNumber, cardsByNumber);
     const zoneLimit = isEgg ? maxEggDeckCards : maxMainDeckCards;
     const zoneCount = isEgg ? eggCount : mainCount;
-    const allowedQuantity = Math.min(deckCard.quantityRequired, maxDeckQuantity, Math.max(zoneLimit - zoneCount, 0));
+    const allowedQuantity = Math.min(deckCard.quantityRequired, cardLimit, sharedGroupAvailable, Math.max(zoneLimit - zoneCount, 0));
     if (allowedQuantity <= 0) continue;
 
     const nextCard = { ...deckCard, quantityRequired: allowedQuantity };
+    if (sharedGroupKey) {
+      sharedGroupCounts.set(sharedGroupKey, sharedGroupCount + allowedQuantity);
+    }
     if (isEgg) {
       eggCards.push(nextCard);
       eggCount += allowedQuantity;
@@ -2404,6 +2522,34 @@ function getDeckLimitMessages(currentCards: Deck["cards"], importedCards: Deck["
   return requested
     .filter((deckCard) => (limitedByNumber.get(normalizeCardNumber(deckCard.cardNumber ?? deckCard.cardId)) ?? 0) < deckCard.quantityRequired)
     .map((deckCard) => `${deckCard.cardNumber ?? deckCard.cardId} limitado por máximo de deck`);
+}
+
+function getCardDeckLimit(card: DigimonCard | undefined) {
+  const effect = card?.effect ?? "";
+  const explicitLimit = effect.match(/include up to\s+(\d+)\s+copies/i);
+  if (explicitLimit?.[1]) return Number(explicitLimit[1]);
+
+  return maxDeckQuantity;
+}
+
+function getSharedDeckLimit(card: DigimonCard | undefined, cardsByNumber: Map<string, DigimonCard>) {
+  const effect = card?.effect ?? "";
+  if (!card || !/may not have more than\s+4\s+total copies/i.test(effect)) return null;
+
+  const mentionedNumbers = Array.from(effect.matchAll(/\[([A-Z]{1,4}\d{0,2}-\d{2,4})\]/gi)).map((match) => normalizeCardNumber(match[1]));
+  const cardNumbers = unique([normalizeCardNumber(card.cardNumber), ...mentionedNumbers])
+    .filter((cardNumber) => cardsByNumber.has(cardNumber))
+    .sort();
+
+  return cardNumbers.length > 1 ? { cardNumbers, max: maxDeckQuantity } : null;
+}
+
+function getSharedDeckGroupCount(deckCards: Deck["cards"], groupCardNumbers: string[], currentCardNumber: string) {
+  return deckCards.reduce((sum, deckCard) => {
+    const cardNumber = normalizeCardNumber(deckCard.cardNumber ?? deckCard.cardId);
+    if (cardNumber === currentCardNumber || !groupCardNumbers.includes(cardNumber)) return sum;
+    return sum + deckCard.quantityRequired;
+  }, 0);
 }
 
 function getDeckZoneCount(deckCards: Deck["cards"], isEggZone: boolean, cardsByNumber: Map<string, DigimonCard>) {
@@ -2481,7 +2627,7 @@ function parseDeckLine(line: string) {
 
     return {
       cardNumber,
-      quantity: Math.min(Math.max(quantity, 1), maxDeckQuantity),
+      quantity: Math.min(Math.max(quantity, 1), maxMainDeckCards),
     };
   }
 
