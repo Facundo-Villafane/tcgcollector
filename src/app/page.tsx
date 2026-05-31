@@ -43,7 +43,7 @@ const STORAGE_KEYS = {
 const maxDeckQuantity = 4;
 const maxMainDeckCards = 50;
 const maxEggDeckCards = 5;
-const cardPageSize = 60;
+const cardPageSize = 80;
 
 type DeckImportResult = {
   importedLines: number;
@@ -767,28 +767,37 @@ export default function Home() {
                 {visibleCards.length === 0 ? (
                   <EmptyState title="Sin resultados" detail="Probá con otro nombre, número, set, color o tipo." />
                 ) : (
-                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                    {paginatedCards.map((card) => (
-                      <CardTile
-                        key={card.id}
-                        card={card}
-                        owned={collection[card.id] ?? 0}
-                        price={cardPrices[normalizeCardNumber(card.cardNumber)]?.marketPrice ?? null}
-                        onOpen={() => {
-                          setSelectedCardPlayableNumber(null);
-                          setSelectedCard(card);
-                        }}
-                        onSetOwned={(quantity) => setOwnedQuantity(card.id, quantity)}
-                        onAddToDeck={
-                          activeDeck
-                            ? () => {
-                                setDeckQuantity(activeDeck.id, card.cardNumber, 1);
-                                setView("decks");
-                              }
-                            : undefined
-                        }
-                      />
-                    ))}
+                  <div className="space-y-3">
+                    <PaginationControls
+                      page={currentCardPage}
+                      totalPages={totalCardPages}
+                      totalItems={visibleCards.length}
+                      pageSize={cardPageSize}
+                      onPageChange={(page) => setCardPagination({ key: cardPaginationKey, page })}
+                    />
+                    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                      {paginatedCards.map((card) => (
+                        <CardTile
+                          key={card.id}
+                          card={card}
+                          owned={collection[card.id] ?? 0}
+                          price={cardPrices[normalizeCardNumber(card.cardNumber)]?.marketPrice ?? null}
+                          onOpen={() => {
+                            setSelectedCardPlayableNumber(null);
+                            setSelectedCard(card);
+                          }}
+                          onSetOwned={(quantity) => setOwnedQuantity(card.id, quantity)}
+                          onAddToDeck={
+                            activeDeck
+                              ? () => {
+                                  setDeckQuantity(activeDeck.id, card.cardNumber, 1);
+                                  setView("decks");
+                                }
+                              : undefined
+                          }
+                        />
+                      ))}
+                    </div>
                   </div>
                 )}
                 <PaginationControls
