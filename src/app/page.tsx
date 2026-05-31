@@ -42,6 +42,7 @@ const STORAGE_KEYS = {
 const maxDeckQuantity = 4;
 const maxMainDeckCards = 50;
 const maxEggDeckCards = 5;
+const cardPageSize = 60;
 
 type DeckImportResult = {
   importedLines: number;
@@ -83,6 +84,7 @@ export default function Home() {
   const [color, setColor] = useState("All");
   const [type, setType] = useState("All");
   const [setCode, setSetCode] = useState("All");
+  const [cardPagination, setCardPagination] = useState({ key: "", page: 1 });
   const [collection, setCollection] = useState<CollectionMap>({});
   const [decks, setDecks] = useState<Deck[]>([]);
   const [publicDecks, setPublicDecks] = useState<Deck[]>([]);
@@ -214,8 +216,21 @@ export default function Home() {
       return matchesQuery && matchesColor && matchesType && matchesSet;
     });
 
-    return view === "catalog" ? result.slice(0, 80) : result;
+    return result;
   }, [cards, color, collectionQuery, query, setCode, type, view]);
+
+  const visibleCards = useMemo(
+    () => (view === "collection" ? filteredCards.filter((card) => (collection[card.id] ?? 0) > 0) : filteredCards),
+    [collection, filteredCards, view],
+  );
+  const cardPaginationKey = `${view}|${query}|${collectionQuery}|${color}|${type}|${setCode}`;
+  const cardPage = cardPagination.key === cardPaginationKey ? cardPagination.page : 1;
+  const totalCardPages = Math.max(Math.ceil(visibleCards.length / cardPageSize), 1);
+  const currentCardPage = Math.min(cardPage, totalCardPages);
+  const paginatedCards = useMemo(() => {
+    const start = (currentCardPage - 1) * cardPageSize;
+    return visibleCards.slice(start, start + cardPageSize);
+  }, [currentCardPage, visibleCards]);
 
   const colors = useMemo(() => unique(cards.flatMap((card) => card.color)).sort(), [cards]);
   const types = useMemo(() => unique(cards.map((card) => card.type)).sort(), [cards]);
@@ -676,7 +691,9 @@ export default function Home() {
               <div className="skeuo-shell rounded-md p-4">
                 <h1 className="text-2xl font-bold">{view === "catalog" ? "Buscar cartas" : "Mi colección"}</h1>
                 <p className="text-sm text-[#60706d]">
-                  {view === "catalog" ? `${cards.length} cartas del catálogo global` : `${collectionCards.length} cartas con copias registradas`}
+                  {view === "catalog"
+                    ? `${visibleCards.length} resultados de ${cards.length} cartas`
+                    : `${visibleCards.length} resultados en tu colección`}
                 </p>
               </div>
               <Filters
@@ -703,28 +720,41 @@ export default function Home() {
             {isLoading && <EmptyState title="Cargando catálogo" detail="La primera carga puede tardar un momento." />}
             {error && <EmptyState title="No se pudo cargar" detail={error} />}
             {!isLoading && !error && (
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                {(view === "catalog" ? filteredCards : filteredCards.filter((card) => (collection[card.id] ?? 0) > 0)).map((card) => (
-                  <CardTile
-                    key={card.id}
-                    card={card}
-                    owned={collection[card.id] ?? 0}
-                    onOpen={() => {
-                      setSelectedCardPlayableNumber(null);
-                      setSelectedCard(card);
-                    }}
-                    onSetOwned={(quantity) => setOwnedQuantity(card.id, quantity)}
-                    onAddToDeck={
-                      activeDeck
-                        ? () => {
-                            setDeckQuantity(activeDeck.id, card.cardNumber, 1);
-                            setView("decks");
-                          }
-                        : undefined
-                    }
-                  />
-                ))}
-              </div>
+              <>
+                {visibleCards.length === 0 ? (
+                  <EmptyState title="Sin resultados" detail="Probá con otro nombre, número, set, color o tipo." />
+                ) : (
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                    {paginatedCards.map((card) => (
+                      <CardTile
+                        key={card.id}
+                        card={card}
+                        owned={collection[card.id] ?? 0}
+                        onOpen={() => {
+                          setSelectedCardPlayableNumber(null);
+                          setSelectedCard(card);
+                        }}
+                        onSetOwned={(quantity) => setOwnedQuantity(card.id, quantity)}
+                        onAddToDeck={
+                          activeDeck
+                            ? () => {
+                                setDeckQuantity(activeDeck.id, card.cardNumber, 1);
+                                setView("decks");
+                              }
+                            : undefined
+                        }
+                      />
+                    ))}
+                  </div>
+                )}
+                <PaginationControls
+                  page={currentCardPage}
+                  totalPages={totalCardPages}
+                  totalItems={visibleCards.length}
+                  pageSize={cardPageSize}
+                  onPageChange={(page) => setCardPagination({ key: cardPaginationKey, page })}
+                />
+              </>
             )}
           </section>
         )}
@@ -1421,6 +1451,54 @@ function CollectionScanner({
         </div>
       )}
     </section>
+  );
+}
+
+function PaginationControls({
+  page,
+  totalPages,
+  totalItems,
+  pageSize,
+  onPageChange,
+}: {
+  page: number;
+  totalPages: number;
+  totalItems: number;
+  pageSize: number;
+  onPageChange: (page: number) => void;
+}) {
+  if (totalPages <= 1) return null;
+
+  const start = (page - 1) * pageSize + 1;
+  const end = Math.min(page * pageSize, totalItems);
+
+  return (
+    <div className="skeuo-card flex flex-col gap-3 rounded-md p-3 sm:flex-row sm:items-center sm:justify-between">
+      <p className="text-sm font-semibold text-[#60706d]">
+        Mostrando {start}-{end} de {totalItems}
+      </p>
+      <div className="flex items-center gap-2">
+        <button
+          className="skeuo-button flex items-center gap-2 rounded-md px-3 py-2 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-45"
+          disabled={page <= 1}
+          onClick={() => onPageChange(Math.max(page - 1, 1))}
+        >
+          <ChevronLeft size={16} />
+          Anterior
+        </button>
+        <span className="rounded-md bg-[#dfe7ea] px-3 py-2 text-sm font-bold shadow-inner">
+          {page} / {totalPages}
+        </span>
+        <button
+          className="skeuo-button flex items-center gap-2 rounded-md px-3 py-2 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-45"
+          disabled={page >= totalPages}
+          onClick={() => onPageChange(Math.min(page + 1, totalPages))}
+        >
+          Siguiente
+          <ChevronRight size={16} />
+        </button>
+      </div>
+    </div>
   );
 }
 
