@@ -754,6 +754,16 @@ export default function Home() {
               </div>
             )}
 
+            {!isLoading && !error && visibleCards.length > 0 && (
+              <PaginationControls
+                page={currentCardPage}
+                totalPages={totalCardPages}
+                totalItems={visibleCards.length}
+                pageSize={cardPageSize}
+                onPageChange={(page) => setCardPagination({ key: cardPaginationKey, page })}
+              />
+            )}
+
             <CollectionScanner
               cardsByNumber={cardsByNumber}
               onAddCard={addCardCopy}
@@ -768,13 +778,6 @@ export default function Home() {
                   <EmptyState title="Sin resultados" detail="Probá con otro nombre, número, set, color o tipo." />
                 ) : (
                   <div className="space-y-3">
-                    <PaginationControls
-                      page={currentCardPage}
-                      totalPages={totalCardPages}
-                      totalItems={visibleCards.length}
-                      pageSize={cardPageSize}
-                      onPageChange={(page) => setCardPagination({ key: cardPaginationKey, page })}
-                    />
                     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                       {paginatedCards.map((card) => (
                         <CardTile
@@ -1544,28 +1547,28 @@ function PaginationControls({
   const end = Math.min(page * pageSize, totalItems);
 
   return (
-    <div className="skeuo-card flex flex-col gap-3 rounded-md p-3 sm:flex-row sm:items-center sm:justify-between">
-      <p className="text-sm font-semibold text-[#60706d]">
+    <div className="skeuo-card sticky bottom-24 z-10 flex flex-col gap-2 rounded-md p-2 sm:static sm:flex-row sm:items-center sm:justify-between sm:p-3">
+      <p className="text-center text-xs font-semibold text-[#60706d] sm:text-left sm:text-sm">
         Mostrando {start}-{end} de {totalItems}
       </p>
-      <div className="flex items-center gap-2">
+      <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
         <button
-          className="skeuo-button flex items-center gap-2 rounded-md px-3 py-2 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-45"
+          className="skeuo-button flex min-w-0 items-center justify-center gap-1 rounded-md px-2 py-2 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-45 sm:gap-2 sm:px-3 sm:text-sm"
           disabled={page <= 1}
           onClick={() => onPageChange(Math.max(page - 1, 1))}
         >
           <ChevronLeft size={16} />
-          Anterior
+          <span>Anterior</span>
         </button>
-        <span className="rounded-md bg-[#dfe7ea] px-3 py-2 text-sm font-bold shadow-inner">
+        <span className="whitespace-nowrap rounded-md bg-[#dfe7ea] px-3 py-2 text-xs font-bold shadow-inner sm:text-sm">
           {page} / {totalPages}
         </span>
         <button
-          className="skeuo-button flex items-center gap-2 rounded-md px-3 py-2 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-45"
+          className="skeuo-button flex min-w-0 items-center justify-center gap-1 rounded-md px-2 py-2 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-45 sm:gap-2 sm:px-3 sm:text-sm"
           disabled={page >= totalPages}
           onClick={() => onPageChange(Math.min(page + 1, totalPages))}
         >
-          Siguiente
+          <span>Siguiente</span>
           <ChevronRight size={16} />
         </button>
       </div>
