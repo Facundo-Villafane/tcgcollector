@@ -249,6 +249,10 @@ export default function Home() {
     () => splitDeckCards(activeDeck, cardsByNumber),
     [activeDeck, cardsByNumber],
   );
+  const deckSearchCards = useMemo(
+    () => filteredCards.filter((card) => !card.isAlternateArt).slice(0, 20),
+    [filteredCards],
+  );
   const pricedCardNumbers = useMemo(
     () => getPricedCardNumbers(decks, publicDecks, collectionCards),
     [collectionCards, decks, publicDecks],
@@ -953,8 +957,11 @@ export default function Home() {
 
                     {deckMode === "edit" && <div className="space-y-2">
                       <h2 className="text-sm font-bold uppercase tracking-wide text-[#60706d]">Agregar cartas</h2>
-                      <div className="grid gap-3 sm:grid-cols-2">
-                        {filteredCards.filter((card) => !card.isAlternateArt).slice(0, 20).map((card) => {
+                      {deckSearchCards.length === 0 ? (
+                        <EmptyState title="Sin cartas para agregar" detail="Ajustá los filtros o buscá por nombre, número o set." />
+                      ) : (
+                        <div className="grid gap-3 sm:grid-cols-2">
+                          {deckSearchCards.map((card) => {
                           const required =
                             activeDeck.cards.find((deckCard) => (deckCard.cardNumber ?? deckCard.cardId) === card.cardNumber)
                               ?.quantityRequired ?? 0;
@@ -970,8 +977,9 @@ export default function Home() {
                               onChange={(quantity) => setDeckQuantity(activeDeck.id, card.cardNumber, quantity)}
                             />
                           );
-                        })}
-                      </div>
+                          })}
+                        </div>
+                      )}
                     </div>}
                   </div>
                 </>
@@ -2495,8 +2503,7 @@ function splitDeckCards(deck: Deck | undefined, cardsByNumber: Map<string, Digim
 
   for (const deckCard of deck?.cards ?? []) {
     const cardNumber = deckCard.cardNumber ?? deckCard.cardId;
-    const card = cardsByNumber.get(normalizeCardNumber(cardNumber));
-    if (!card) continue;
+    const card = cardsByNumber.get(normalizeCardNumber(cardNumber)) ?? createFallbackDeckCard(cardNumber);
 
     const item = { cardNumber, card, quantityRequired: deckCard.quantityRequired };
     if (card.type === "Digi-Egg") {
@@ -2527,6 +2534,24 @@ function splitDeckCards(deck: Deck | undefined, cardsByNumber: Map<string, Digim
     groups,
     mainCount: main.reduce((sum, item) => sum + item.quantityRequired, 0),
     eggCount: eggs.reduce((sum, item) => sum + item.quantityRequired, 0),
+  };
+}
+
+function createFallbackDeckCard(cardNumber: string): DigimonCard {
+  return {
+    id: cardNumber,
+    name: cardNumber,
+    cardNumber,
+    variantLabel: "Carta del deck",
+    isAlternateArt: false,
+    parallelId: 0,
+    setCode: cardNumber.split("-")[0] ?? "Deck",
+    setName: "Carta guardada en el deck",
+    color: ["Colorless"],
+    type: "Digimon",
+    rarity: "-",
+    imageUrl:
+      "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 500 700'%3E%3Crect width='500' height='700' rx='28' fill='%23dfe7ea'/%3E%3Crect x='36' y='36' width='428' height='628' rx='20' fill='none' stroke='%23127d84' stroke-width='12'/%3E%3Ctext x='250' y='330' text-anchor='middle' font-family='Arial' font-size='44' font-weight='700' fill='%231b2424'%3ETamer Binder%3C/text%3E%3Ctext x='250' y='386' text-anchor='middle' font-family='Arial' font-size='34' fill='%2360706d'%3ECarta%3C/text%3E%3C/svg%3E",
   };
 }
 
