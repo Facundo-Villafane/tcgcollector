@@ -37,6 +37,7 @@ type DeckMode = "view" | "edit";
 const STORAGE_KEYS = {
   collection: "tamer-binder:collection",
   decks: "tamer-binder:decks",
+  prices: "tamer-binder:card-prices",
 };
 
 const maxDeckQuantity = 4;
@@ -102,8 +103,10 @@ export default function Home() {
     queueMicrotask(() => {
       const savedCollection = readStorage<CollectionMap>(STORAGE_KEYS.collection, {});
       const savedDecks = readStorage<Deck[]>(STORAGE_KEYS.decks, []);
+      const savedPrices = readStorage<CardPriceMap>(STORAGE_KEYS.prices, {});
       setCollection(savedCollection);
       setDecks(savedDecks);
+      setCardPrices(savedPrices);
       setActiveDeckId("");
     });
   }, []);
@@ -173,6 +176,10 @@ export default function Home() {
   useEffect(() => {
     writeStorage(STORAGE_KEYS.decks, decks);
   }, [decks]);
+
+  useEffect(() => {
+    writeStorage(STORAGE_KEYS.prices, cardPrices);
+  }, [cardPrices]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -734,6 +741,7 @@ export default function Home() {
                         key={card.id}
                         card={card}
                         owned={collection[card.id] ?? 0}
+                        price={cardPrices[normalizeCardNumber(card.cardNumber)]?.marketPrice ?? null}
                         onOpen={() => {
                           setSelectedCardPlayableNumber(null);
                           setSelectedCard(card);
@@ -1567,7 +1575,23 @@ function Select({ value, onChange, options }: { value: string; onChange: (value:
   );
 }
 
-function CardTile({ card, owned, onOpen, onSetOwned, onAddToDeck }: { card: DigimonCard; owned: number; onOpen: () => void; onSetOwned: (quantity: number) => void; onAddToDeck?: () => void }) {
+function CardTile({
+  card,
+  owned,
+  price,
+  onOpen,
+  onSetOwned,
+  onAddToDeck,
+}: {
+  card: DigimonCard;
+  owned: number;
+  price: number | null;
+  onOpen: () => void;
+  onSetOwned: (quantity: number) => void;
+  onAddToDeck?: () => void;
+}) {
+  const ownedValue = price === null ? null : price * owned;
+
   return (
     <article className="skeuo-card grid grid-cols-[92px_1fr] gap-3 rounded-md p-3">
       <button className="card-sleeve overflow-hidden rounded-md bg-[#eef0e9] p-1" onClick={onOpen}>
@@ -1584,6 +1608,10 @@ function CardTile({ card, owned, onOpen, onSetOwned, onAddToDeck }: { card: Digi
         <p className={`mt-1 text-xs font-semibold ${card.isAlternateArt ? "text-[#b14d19]" : "text-[#127d84]"}`}>
           {card.variantLabel}
         </p>
+        <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs font-semibold text-[#1d5fa8]">
+          <span>{price === null ? "Precio pendiente" : `${formatMoney(price)} c/u`}</span>
+          {owned > 0 && <span>Total: {formatKnownMoney(ownedValue, price !== null)}</span>}
+        </div>
         <div className="mt-3 flex items-center justify-between gap-2">
           <QuantityStepper value={owned} onChange={onSetOwned} label="Tengo" />
           {onAddToDeck && (
