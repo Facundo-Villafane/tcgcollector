@@ -98,7 +98,7 @@ export default function Home() {
   const [showDeckImages, setShowDeckImages] = useState(true);
   const [showMobileScanner, setShowMobileScanner] = useState(false);
   const [cardPrices, setCardPrices] = useState<CardPriceMap>({});
-  const [priceStatus, setPriceStatus] = useState("Precios pendientes");
+  const [priceStatus, setPriceStatus] = useState("Precios pendientes. Actualizalos manualmente.");
 
   useEffect(() => {
     queueMicrotask(() => {
@@ -261,10 +261,6 @@ export default function Home() {
     () => filteredCards.filter((card) => !card.isAlternateArt).slice(0, 20),
     [filteredCards],
   );
-  const pricedCardNumbers = useMemo(
-    () => getPricedCardNumbers(decks, publicDecks, collectionCards),
-    [collectionCards, decks, publicDecks],
-  );
   const totalMissingCopies = deckStats.reduce((sum, stat) => sum + stat.missingCopies, 0);
   const ownedCopies = Object.values(collection).reduce((sum, quantity) => sum + quantity, 0);
   const totalMissingValue = deckPriceStats.reduce((sum, stat) => sum + stat.missingValue, 0);
@@ -299,22 +295,6 @@ export default function Home() {
     const missingCount = payload.missing?.length ?? 0;
     setPriceStatus(loadedCount > 0 ? `${loadedCount} precios actualizados${missingCount > 0 ? ` · ${missingCount} pendientes` : ""}` : "Sin precios para esas cartas");
   }, []);
-
-  useEffect(() => {
-    if (pricedCardNumbers.length === 0) return;
-
-    const controller = new AbortController();
-    const timeoutId = window.setTimeout(() => {
-      refreshPrices(pricedCardNumbers, controller.signal).catch(() => {
-        setPriceStatus("Precios no disponibles");
-      });
-    }, 0);
-
-    return () => {
-      window.clearTimeout(timeoutId);
-      controller.abort();
-    };
-  }, [pricedCardNumbers, refreshPrices]);
 
   async function handleGoogleLogin() {
     setAuthError("");
@@ -743,14 +723,14 @@ export default function Home() {
 
             {view === "collection" && (
               <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-[#c9d2cd] bg-white/70 p-3">
-                <p className="text-sm text-[#60706d]">Los precios se guardan localmente y se actualizan desde tcgapi.dev.</p>
+                <p className="text-sm text-[#60706d]">Los precios se guardan localmente. Para cuidar el lÃ­mite diario, se actualiza sÃ³lo esta pÃ¡gina.</p>
                 <button
                   className="skeuo-button flex items-center gap-2 rounded-md px-3 py-2 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-45"
-                  onClick={() => refreshPrices(visibleCards.map((card) => card.cardNumber))}
-                  disabled={visibleCards.length === 0}
+                  onClick={() => refreshPrices(paginatedCards.map((card) => card.cardNumber))}
+                  disabled={paginatedCards.length === 0}
                 >
                   <Zap size={16} />
-                  Actualizar precios
+                  Actualizar esta pÃ¡gina
                 </button>
               </div>
             )}
@@ -2338,22 +2318,6 @@ function getCollectionValue(collection: CollectionMap, cardsById: Map<string, Di
     const cardNumber = normalizeCardNumber(card?.cardNumber ?? cardId);
     return sum + (cardPrices[cardNumber]?.marketPrice ?? 0) * quantity;
   }, 0);
-}
-
-function getPricedCardNumbers(decks: Deck[], publicDecks: Deck[], collectionCards: DigimonCard[]) {
-  const cardNumbers = new Set<string>();
-
-  for (const card of collectionCards) {
-    cardNumbers.add(normalizeCardNumber(card.cardNumber));
-  }
-
-  for (const deck of [...decks, ...publicDecks]) {
-    for (const deckCard of deck.cards) {
-      cardNumbers.add(normalizeCardNumber(deckCard.cardNumber ?? deckCard.cardId));
-    }
-  }
-
-  return Array.from(cardNumbers).sort();
 }
 
 function formatMoney(value: number | null | undefined, currency = "USD") {
