@@ -860,7 +860,7 @@ export default function Home() {
                         Editar
                       </button>
                     </div>
-                    {deckMode === "view" && (
+                    {deckMode === "view" && activeDeck.cards.length > 0 && (
                       <p className="text-sm text-[#60706d]">Modo solo lectura. Entrá a editar para modificar este deck.</p>
                     )}
                   </div>
@@ -893,6 +893,20 @@ export default function Home() {
                     </>
                   )}
                   <div className="grid gap-3">
+                    {activeDeck.cards.length === 0 && deckMode === "view" && (
+                      <div className="rounded-md border border-dashed border-[#b9c5bf] bg-white/75 p-5 text-center">
+                        <p className="font-semibold">Este deck todavÃ­a no tiene cartas</p>
+                        <p className="mt-1 text-sm text-[#60706d]">EntrÃ¡ a editar para importar una lista o agregar cartas desde el buscador.</p>
+                        <button
+                          className="skeuo-primary mt-3 inline-flex items-center justify-center gap-2 rounded-md px-4 py-2 font-semibold text-white"
+                          onClick={() => setDeckMode("edit")}
+                        >
+                          <Pencil size={16} />
+                          Editar deck
+                        </button>
+                      </div>
+                    )}
+
                     {activeDeck.cards.length > 0 && (
                       <div className="space-y-2">
                         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
