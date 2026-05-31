@@ -96,6 +96,7 @@ export default function Home() {
   const [selectedCard, setSelectedCard] = useState<DigimonCard | null>(null);
   const [selectedCardPlayableNumber, setSelectedCardPlayableNumber] = useState<string | null>(null);
   const [showDeckImages, setShowDeckImages] = useState(true);
+  const [showMobileScanner, setShowMobileScanner] = useState(false);
   const [cardPrices, setCardPrices] = useState<CardPriceMap>({});
   const [priceStatus, setPriceStatus] = useState("Precios pendientes");
 
@@ -764,11 +765,24 @@ export default function Home() {
               />
             )}
 
-            <CollectionScanner
-              cardsByNumber={cardsByNumber}
-              onAddCard={addCardCopy}
-              disabled={cards.length === 0}
-            />
+            <div className="md:hidden">
+              <button
+                className="skeuo-button flex w-full items-center justify-center gap-2 rounded-md px-4 py-3 text-sm font-bold"
+                onClick={() => setShowMobileScanner((current) => !current)}
+              >
+                <ScanLine size={17} />
+                {showMobileScanner ? "Ocultar scanner rápido" : "Mostrar scanner rápido"}
+              </button>
+              {showMobileScanner && (
+                <div className="mt-3">
+                  <CollectionScanner
+                    cardsByNumber={cardsByNumber}
+                    onAddCard={addCardCopy}
+                    disabled={cards.length === 0}
+                  />
+                </div>
+              )}
+            </div>
 
             {isLoading && <EmptyState title="Cargando catálogo" detail="La primera carga puede tardar un momento." />}
             {error && <EmptyState title="No se pudo cargar" detail={error} />}
