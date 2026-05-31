@@ -21,8 +21,41 @@ create table if not exists public.decks (
 create table if not exists public.deck_cards (
   deck_id uuid not null references public.decks(id) on delete cascade,
   card_number text not null,
-  quantity_required integer not null check (quantity_required between 1 and 4),
+  quantity_required integer not null check (quantity_required between 1 and 50),
   primary key (deck_id, card_number)
+);
+
+do $$
+begin
+  if exists (
+    select 1
+    from pg_constraint
+    where conname = 'deck_cards_quantity_required_check'
+      and conrelid = 'public.deck_cards'::regclass
+  ) then
+    alter table public.deck_cards drop constraint deck_cards_quantity_required_check;
+  end if;
+
+  alter table public.deck_cards
+    add constraint deck_cards_quantity_required_check
+    check (quantity_required between 1 and 50);
+end $$;
+
+create table if not exists public.user_profiles (
+  user_id uuid primary key references auth.users(id) on delete cascade,
+  username text unique,
+  display_name text,
+  bio text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.user_snapshots (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  label text not null,
+  snapshot jsonb not null,
+  created_at timestamptz not null default now()
 );
 
 create table if not exists public.deck_likes (
@@ -48,10 +81,32 @@ alter table public.decks enable row level security;
 alter table public.deck_cards enable row level security;
 alter table public.deck_likes enable row level security;
 alter table public.card_prices enable row level security;
+alter table public.user_profiles enable row level security;
+alter table public.user_snapshots enable row level security;
 
 drop policy if exists "Users can manage their collection" on public.user_collection;
 create policy "Users can manage their collection"
 on public.user_collection
+for all
+using (auth.uid() = user_id)
+with check (auth.uid() = user_id);
+
+drop policy if exists "Public profiles are readable" on public.user_profiles;
+create policy "Public profiles are readable"
+on public.user_profiles
+for select
+using (true);
+
+drop policy if exists "Users can manage own profile" on public.user_profiles;
+create policy "Users can manage own profile"
+on public.user_profiles
+for all
+using (auth.uid() = user_id)
+with check (auth.uid() = user_id);
+
+drop policy if exists "Users can manage own snapshots" on public.user_snapshots;
+create policy "Users can manage own snapshots"
+on public.user_snapshots
 for all
 using (auth.uid() = user_id)
 with check (auth.uid() = user_id);

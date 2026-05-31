@@ -32,13 +32,14 @@ import type { CardPriceMap, CollectionMap, Deck, DigimonCard, UserProfile } from
 import { bannedCardNumbers, bannedPairGroups, deckRestrictionSource, restrictedToOneCardNumbers } from "@/lib/data/deck-restrictions";
 import { createClient } from "@/utils/supabase/client";
 
-type View = "dashboard" | "catalog" | "collection" | "decks";
+type View = "dashboard" | "catalog" | "collection" | "decks" | "profile";
 type DeckMode = "view" | "edit";
 
 const STORAGE_KEYS = {
   collection: "tamer-binder:collection",
   decks: "tamer-binder:decks",
   prices: "tamer-binder:card-prices",
+  snapshots: "tamer-binder:snapshots",
 };
 
 const maxDeckQuantity = 4;
@@ -70,6 +71,25 @@ type DeckRow = {
   }>;
 };
 
+type DataSnapshot = {
+  id: string;
+  label: string;
+  createdAt: string;
+  collection: CollectionMap;
+  decks: Deck[];
+};
+
+type ProfileView = {
+  displayName: string;
+  saveStatus: string;
+  collectionCount: number;
+  deckCount: number;
+  snapshots: DataSnapshot[];
+  onRestoreSnapshot: (snapshot: DataSnapshot) => void;
+  onDeleteSnapshot: (snapshotId: string) => void;
+  onLogout: () => void;
+};
+
 export default function Home() {
   const supabase = useMemo(() => createClient(), []);
   const [cards, setCards] = useState<DigimonCard[]>([]);
@@ -99,6 +119,7 @@ export default function Home() {
   const [showDeckImages, setShowDeckImages] = useState(true);
   const [showMobileScanner, setShowMobileScanner] = useState(false);
   const [cardPrices, setCardPrices] = useState<CardPriceMap>({});
+  const [snapshots, setSnapshots] = useState<DataSnapshot[]>([]);
   const [priceStatus, setPriceStatus] = useState("Precios pendientes. Actualizalos manualmente.");
 
   useEffect(() => {
@@ -106,9 +127,11 @@ export default function Home() {
       const savedCollection = readStorage<CollectionMap>(STORAGE_KEYS.collection, {});
       const savedDecks = readStorage<Deck[]>(STORAGE_KEYS.decks, []);
       const savedPrices = readStorage<CardPriceMap>(STORAGE_KEYS.prices, {});
+      const savedSnapshots = readStorage<DataSnapshot[]>(STORAGE_KEYS.snapshots, []);
       setCollection(savedCollection);
       setDecks(savedDecks);
       setCardPrices(savedPrices);
+      setSnapshots(savedSnapshots);
       setActiveDeckId("");
     });
   }, []);
@@ -182,6 +205,10 @@ export default function Home() {
   useEffect(() => {
     writeStorage(STORAGE_KEYS.prices, cardPrices);
   }, [cardPrices]);
+
+  useEffect(() => {
+    writeStorage(STORAGE_KEYS.snapshots, snapshots);
+  }, [snapshots]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -315,6 +342,33 @@ export default function Home() {
     await supabase.auth.signOut();
     setUser(null);
     setHasLoadedRemoteData(false);
+    setView("dashboard");
+  }
+
+  function createLocalSnapshot(label: string, nextCollection = collection, nextDecks = decks) {
+    if (Object.keys(nextCollection).length === 0 && nextDecks.length === 0) return;
+
+    const snapshot: DataSnapshot = {
+      id: crypto.randomUUID(),
+      label,
+      createdAt: new Date().toISOString(),
+      collection: nextCollection,
+      decks: nextDecks,
+    };
+    setSnapshots((current) => [snapshot, ...current].slice(0, 12));
+  }
+
+  function restoreSnapshot(snapshot: DataSnapshot) {
+    createLocalSnapshot("Antes de restaurar snapshot");
+    setCollection(snapshot.collection);
+    setDecks(snapshot.decks);
+    setActiveDeckId("");
+    setView("profile");
+    setSaveStatus("Snapshot restaurado");
+  }
+
+  function deleteSnapshot(snapshotId: string) {
+    setSnapshots((current) => current.filter((snapshot) => snapshot.id !== snapshotId));
   }
 
   async function loadRemoteUserData(userId: string) {
@@ -356,6 +410,7 @@ export default function Home() {
       return;
     }
 
+    createLocalSnapshot("Antes de cargar Supabase");
     setCollection(remoteCollection);
     setDecks(remoteDecks);
     setActiveDeckId("");
@@ -372,6 +427,7 @@ export default function Home() {
       return;
     }
 
+    createLocalSnapshot("Antes de sincronizar coleccion", nextCollection, decks);
     const { error: deleteError } = await supabase.from("user_collection").delete().eq("user_id", userId);
 
     if (deleteError) {
@@ -420,6 +476,7 @@ export default function Home() {
       return;
     }
 
+    createLocalSnapshot("Antes de sincronizar decks", collection, nextDecks);
     const { error: upsertError } = await supabase.from("decks").upsert(
       nextDecks.map((deck) => ({
         id: deck.id,
@@ -655,8 +712,8 @@ export default function Home() {
           {user ? (
           <button
             className="skeuo-button grid h-10 w-10 place-items-center rounded-md text-[#1b2424]"
-            title="Cerrar sesión"
-            onClick={handleLogout}
+            title="Perfil"
+            onClick={() => setView("profile")}
           >
             <UserIcon size={18} />
           </button>
@@ -948,6 +1005,7 @@ export default function Home() {
                     onPublicChange={(isPublic) => updateDeckDetails(activeDeck.id, { isPublic })}
                     onDelete={() => deleteDeck(activeDeck.id)}
                   />
+                  <DeckExportPanel deck={activeDeck} cardsByNumber={cardsByNumber} />
                   {deckMode === "edit" && (
                     <>
                       <DeckImportPanel onImport={(text) => importDeckList(activeDeck.id, text)} disabled={cards.length === 0} />
@@ -1085,6 +1143,19 @@ export default function Home() {
             </div>
           </section>
         )}
+
+        {view === "profile" && user && (
+          <ProfilePanel
+            displayName={user.displayName}
+            saveStatus={saveStatus}
+            collectionCount={collectionCards.length}
+            deckCount={decks.length}
+            snapshots={snapshots}
+            onRestoreSnapshot={restoreSnapshot}
+            onDeleteSnapshot={deleteSnapshot}
+            onLogout={handleLogout}
+          />
+        )}
       </div>
 
       <BottomNavigation
@@ -1129,6 +1200,69 @@ function EmptyPage({ title, detail }: { title: string; detail: string }) {
     <main className="grid min-h-screen place-items-center px-4">
       <EmptyState title={title} detail={detail} />
     </main>
+  );
+}
+
+function ProfilePanel({
+  displayName,
+  saveStatus,
+  collectionCount,
+  deckCount,
+  snapshots,
+  onRestoreSnapshot,
+  onDeleteSnapshot,
+  onLogout,
+}: ProfileView) {
+  return (
+    <section className="skeuo-shell space-y-5 rounded-md p-4 sm:p-5">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <p className="text-sm font-semibold uppercase tracking-wide text-[#127d84]">Perfil</p>
+          <h1 className="mt-1 text-2xl font-bold">{displayName}</h1>
+          <p className="mt-1 text-sm text-[#60706d]">{saveStatus}</p>
+        </div>
+        <button className="skeuo-button rounded-md px-4 py-2 text-sm font-semibold" onClick={onLogout}>
+          Cerrar sesion
+        </button>
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-3">
+        <Metric label="Cartas" value={collectionCount.toString()} detail="en tu coleccion" />
+        <Metric label="Decks" value={deckCount.toString()} detail="creados por vos" />
+        <Metric label="Snapshots" value={snapshots.length.toString()} detail="guardados localmente" />
+      </div>
+
+      <div className="rounded-md border border-[#c9d2cd] bg-white/70 p-3">
+        <h2 className="font-bold">Historial local</h2>
+        <p className="mt-1 text-sm text-[#60706d]">
+          La app guarda snapshots locales antes de sincronizar datos. Sirven como red de seguridad en este navegador.
+        </p>
+        <div className="mt-3 space-y-2">
+          {snapshots.length === 0 ? (
+            <p className="text-sm text-[#60706d]">Todavia no hay snapshots.</p>
+          ) : (
+            snapshots.map((snapshot) => (
+              <div key={snapshot.id} className="flex flex-col gap-2 rounded-md border border-[#d9ded6] bg-white p-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="font-semibold">{snapshot.label}</p>
+                  <p className="text-sm text-[#60706d]">
+                    {new Date(snapshot.createdAt).toLocaleString()} · {Object.keys(snapshot.collection).length} cartas · {snapshot.decks.length} decks
+                  </p>
+                </div>
+                <div className="flex gap-2">
+                  <button className="skeuo-primary rounded-md px-3 py-2 text-sm font-semibold text-white" onClick={() => onRestoreSnapshot(snapshot)}>
+                    Restaurar
+                  </button>
+                  <button className="skeuo-button rounded-md px-3 py-2 text-sm font-semibold" onClick={() => onDeleteSnapshot(snapshot.id)}>
+                    Borrar
+                  </button>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -2033,6 +2167,34 @@ function DeckImportPanel({ onImport, disabled }: { onImport: (text: string) => D
   );
 }
 
+function DeckExportPanel({ deck, cardsByNumber }: { deck: Deck; cardsByNumber: Map<string, DigimonCard> }) {
+  const exportText = useMemo(() => formatDeckExport(deck, cardsByNumber), [cardsByNumber, deck]);
+  const [copied, setCopied] = useState(false);
+
+  async function copyExport() {
+    await navigator.clipboard.writeText(exportText);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1200);
+  }
+
+  return (
+    <details className="skeuo-card rounded-md p-3">
+      <summary className="cursor-pointer font-bold">Exportar deck</summary>
+      <div className="mt-3 space-y-3">
+        <textarea
+          className="min-h-44 w-full rounded-md border border-[#c9d2cd] bg-[#f6f9fa] px-3 py-2 font-mono text-sm outline-none"
+          readOnly
+          value={exportText}
+        />
+        <button className="skeuo-button flex items-center gap-2 rounded-md px-3 py-2 text-sm font-semibold" onClick={copyExport}>
+          <ClipboardList size={16} />
+          {copied ? "Copiado" : "Copiar decklist"}
+        </button>
+      </div>
+    </details>
+  );
+}
+
 function DeckSection({
   title,
   items,
@@ -2754,6 +2916,27 @@ function parseDeckLine(line: string) {
   }
 
   return null;
+}
+
+function formatDeckExport(deck: Deck, cardsByNumber: Map<string, DigimonCard>) {
+  const lines = [`// ${deck.name}`, "// Qty Name Id"];
+  const sortedCards = [...deck.cards].sort((a, b) => {
+    const aNumber = normalizeCardNumber(a.cardNumber ?? a.cardId);
+    const bNumber = normalizeCardNumber(b.cardNumber ?? b.cardId);
+    const aCard = cardsByNumber.get(aNumber);
+    const bCard = cardsByNumber.get(bNumber);
+    const aZone = aCard?.type === "Digi-Egg" ? 1 : 0;
+    const bZone = bCard?.type === "Digi-Egg" ? 1 : 0;
+    return aZone - bZone || aNumber.localeCompare(bNumber, undefined, { numeric: true });
+  });
+
+  for (const deckCard of sortedCards) {
+    const cardNumber = normalizeCardNumber(deckCard.cardNumber ?? deckCard.cardId);
+    const card = cardsByNumber.get(cardNumber);
+    lines.push(`${deckCard.quantityRequired} ${card?.name ?? ""} ${cardNumber}`.replace(/\s+/g, " ").trim());
+  }
+
+  return lines.join("\n");
 }
 
 function toUserProfile(user: SupabaseUser): UserProfile {
