@@ -280,7 +280,8 @@ export default function Home() {
     setPriceStatus("Actualizando precios...");
     const response = await fetch(`/api/prices?cards=${encodeURIComponent(normalizedCardNumbers.join(","))}`, { signal });
     if (!response.ok) {
-      setPriceStatus("Precios no disponibles");
+      const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+      setPriceStatus(response.status === 429 ? "Límite diario de precios agotado" : payload?.error ?? "Precios no disponibles");
       return;
     }
 

@@ -105,6 +105,9 @@ async function fetchTcgApiDevPrice(cardNumber: string, cardName?: string): Promi
     headers: { "X-API-Key": tcgApiDevKey, Authorization: `Bearer ${tcgApiDevKey}` },
     next: { revalidate: 60 * 60 },
   });
+  if (response.status === 429) {
+    throw new Error("TCGAPI_RATE_LIMIT");
+  }
   if (!response.ok) return null;
 
   const payload = (await response.json()) as { data?: TcgApiSearchItem[] };

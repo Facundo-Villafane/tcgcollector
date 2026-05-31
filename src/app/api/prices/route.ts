@@ -19,6 +19,12 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(payload);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unexpected price API error";
+    if (message === "TCGAPI_RATE_LIMIT") {
+      return NextResponse.json(
+        { error: "Límite diario de tcgapi.dev agotado. Vuelve a intentar después del reset diario.", prices: {}, missing: cardNumbers },
+        { status: 429 },
+      );
+    }
     return NextResponse.json({ error: message, prices: {}, missing: cardNumbers }, { status: 502 });
   }
 }
