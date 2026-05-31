@@ -335,10 +335,12 @@ export default function Home() {
       return;
     }
 
+    const localCollection = readStorage<CollectionMap>(STORAGE_KEYS.collection, {});
     const localDecks = readStorage<Deck[]>(STORAGE_KEYS.decks, []);
-    const remoteCollection = Object.fromEntries(
+    const remoteCollectionRows = Object.fromEntries(
       (collectionRows ?? []).map((row) => [String(row.card_id), Number(row.quantity)]),
     );
+    const remoteCollection = Object.keys(remoteCollectionRows).length > 0 ? remoteCollectionRows : localCollection;
     const remoteDecks = ((deckRows ?? []) as DeckRow[]).map(fromDeckRow).map((remoteDeck) => {
       if (remoteDeck.cards.length > 0) return remoteDeck;
 
@@ -346,7 +348,7 @@ export default function Home() {
       return localDeck ? { ...remoteDeck, cards: localDeck.cards } : remoteDeck;
     });
 
-    if (Object.keys(remoteCollection).length === 0 && remoteDecks.length === 0 && (Object.keys(collection).length > 0 || decks.length > 0)) {
+    if (Object.keys(remoteCollectionRows).length === 0 && remoteDecks.length === 0 && (Object.keys(collection).length > 0 || decks.length > 0)) {
       setHasLoadedRemoteData(true);
       setSaveStatus("Migrando datos locales...");
       await syncCollection(userId, collection);
@@ -362,29 +364,32 @@ export default function Home() {
   }
 
   async function syncCollection(userId: string, nextCollection: CollectionMap) {
-    setSaveStatus("Guardando colección...");
+    setSaveStatus("Guardando coleccion...");
 
     const entries = Object.entries(nextCollection).filter(([, quantity]) => quantity > 0);
-    const { error: deleteError } = await supabase.from("user_collection").delete().eq("user_id", userId);
-
-    if (deleteError) {
-      setSaveStatus("No se pudo guardar colección");
+    if (entries.length === 0) {
+      setSaveStatus("Sincronizado");
       return;
     }
 
-    if (entries.length > 0) {
-      const { error: insertError } = await supabase.from("user_collection").insert(
-        entries.map(([cardId, quantity]) => ({
-          user_id: userId,
-          card_id: cardId,
-          quantity,
-        })),
-      );
+    const { error: deleteError } = await supabase.from("user_collection").delete().eq("user_id", userId);
 
-      if (insertError) {
-        setSaveStatus("No se pudo guardar colección");
-        return;
-      }
+    if (deleteError) {
+      setSaveStatus("No se pudo guardar coleccion");
+      return;
+    }
+
+    const { error: insertError } = await supabase.from("user_collection").insert(
+      entries.map(([cardId, quantity]) => ({
+        user_id: userId,
+        card_id: cardId,
+        quantity,
+      })),
+    );
+
+    if (insertError) {
+      setSaveStatus("No se pudo guardar coleccion");
+      return;
     }
 
     setSaveStatus("Sincronizado");
