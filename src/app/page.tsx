@@ -335,10 +335,16 @@ export default function Home() {
       return;
     }
 
+    const localDecks = readStorage<Deck[]>(STORAGE_KEYS.decks, []);
     const remoteCollection = Object.fromEntries(
       (collectionRows ?? []).map((row) => [String(row.card_id), Number(row.quantity)]),
     );
-    const remoteDecks = ((deckRows ?? []) as DeckRow[]).map(fromDeckRow);
+    const remoteDecks = ((deckRows ?? []) as DeckRow[]).map(fromDeckRow).map((remoteDeck) => {
+      if (remoteDeck.cards.length > 0) return remoteDeck;
+
+      const localDeck = localDecks.find((deck) => deck.id === remoteDeck.id && deck.cards.length > 0);
+      return localDeck ? { ...remoteDeck, cards: localDeck.cards } : remoteDeck;
+    });
 
     if (Object.keys(remoteCollection).length === 0 && remoteDecks.length === 0 && (Object.keys(collection).length > 0 || decks.length > 0)) {
       setHasLoadedRemoteData(true);
@@ -429,25 +435,27 @@ export default function Home() {
     }
 
     for (const deck of nextDecks) {
+      if (deck.cards.length === 0) {
+        continue;
+      }
+
       const { error: deleteCardsError } = await supabase.from("deck_cards").delete().eq("deck_id", deck.id);
       if (deleteCardsError) {
         setSaveStatus("No se pudieron guardar cartas del deck");
         return;
       }
 
-      if (deck.cards.length > 0) {
-        const { error: insertCardsError } = await supabase.from("deck_cards").insert(
-          deck.cards.map((deckCard) => ({
-            deck_id: deck.id,
-            card_number: deckCard.cardNumber ?? deckCard.cardId,
-            quantity_required: deckCard.quantityRequired,
-          })),
-        );
+      const { error: insertCardsError } = await supabase.from("deck_cards").insert(
+        deck.cards.map((deckCard) => ({
+          deck_id: deck.id,
+          card_number: deckCard.cardNumber ?? deckCard.cardId,
+          quantity_required: deckCard.quantityRequired,
+        })),
+      );
 
-        if (insertCardsError) {
-          setSaveStatus("No se pudieron guardar cartas del deck");
-          return;
-        }
+      if (insertCardsError) {
+        setSaveStatus("No se pudieron guardar cartas del deck");
+        return;
       }
     }
 
@@ -724,14 +732,14 @@ export default function Home() {
 
             {view === "collection" && (
               <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-[#c9d2cd] bg-white/70 p-3">
-                <p className="text-sm text-[#60706d]">Los precios se guardan localmente. Para cuidar el lÃ­mite diario, se actualiza sÃ³lo esta pÃ¡gina.</p>
+                <p className="text-sm text-[#60706d]">Los precios se guardan localmente. Para cuidar el limite diario, se actualiza solo esta pagina.</p>
                 <button
                   className="skeuo-button flex items-center gap-2 rounded-md px-3 py-2 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-45"
                   onClick={() => refreshPrices(paginatedCards.map((card) => card.cardNumber))}
                   disabled={paginatedCards.length === 0}
                 >
                   <Zap size={16} />
-                  Actualizar esta pÃ¡gina
+                  Actualizar esta pagina
                 </button>
               </div>
             )}
@@ -956,8 +964,8 @@ export default function Home() {
                   <div className="grid gap-3">
                     {activeDeck.cards.length === 0 && deckMode === "view" && (
                       <div className="rounded-md border border-dashed border-[#b9c5bf] bg-white/75 p-5 text-center">
-                        <p className="font-semibold">Este deck todavÃ­a no tiene cartas</p>
-                        <p className="mt-1 text-sm text-[#60706d]">EntrÃ¡ a editar para importar una lista o agregar cartas desde el buscador.</p>
+                        <p className="font-semibold">Este deck todavia no tiene cartas</p>
+                        <p className="mt-1 text-sm text-[#60706d]">Entra a editar para importar una lista o agregar cartas desde el buscador.</p>
                         <button
                           className="skeuo-primary mt-3 inline-flex items-center justify-center gap-2 rounded-md px-4 py-2 font-semibold text-white"
                           onClick={() => setDeckMode("edit")}
@@ -1211,7 +1219,7 @@ function LatestDecks({ decks, cardsByNumber, cardPrices }: { decks: Deck[]; card
               <span className="rounded bg-black/55 px-2 py-1 text-xs font-bold shadow-sm">{cover?.color[0] ?? "Deck"}</span>
               <div className="absolute bottom-4 left-4 right-4">
                 <h3 className="truncate text-lg font-bold">{deck.name}</h3>
-                <p className="text-xs text-white/80">{deck.viewCount ?? 0} views Â· {formatKnownMoney(priceStats.totalValue, priceStats.pricedCards > 0)}</p>
+                <p className="text-xs text-white/80">{deck.viewCount ?? 0} views · {formatKnownMoney(priceStats.totalValue, priceStats.pricedCards > 0)}</p>
               </div>
             </a>
           );
@@ -2559,7 +2567,7 @@ function getDeckRestrictionIssues(deckCards: Deck["cards"]) {
     if (isBannedCard(cardNumber) && quantity > 0) {
       issues.push(`${cardNumber}: carta prohibida`);
     } else if (isRestrictedToOneCard(cardNumber) && quantity > 1) {
-      issues.push(`${cardNumber}: mÃ¡ximo 1 copia`);
+      issues.push(`${cardNumber}: maximo 1 copia`);
     }
   }
 
