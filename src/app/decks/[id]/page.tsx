@@ -62,7 +62,7 @@ export default async function PublicDeckPage({ params }: PageProps) {
   const cover = getDeckCover(deck, cardsByNumber);
   const groups = groupDeckCards(deck, cardsByNumber);
   const latestDecks = ((latestRows ?? []) as DeckRow[]).map(fromDeckRow);
-  const { prices: cardPrices } = await getCardPrices(getDeckCardNumbers([deck, ...latestDecks]));
+  const { prices: cardPrices } = await getCardPrices(getDeckCardNumbers([deck, ...latestDecks]), getCardNamesByNumber(cards));
   const priceStats = getDeckPriceStats(deck, cardPrices);
 
   return (
@@ -99,7 +99,7 @@ export default async function PublicDeckPage({ params }: PageProps) {
           <div className="mt-3 flex flex-wrap gap-3 text-sm text-white/85">
             <span className="flex items-center gap-1"><Eye size={16} /> {(deck.viewCount ?? 0) + (isOwner ? 0 : 1)} views</span>
             <span className="flex items-center gap-1"><Heart size={16} /> {likeCount ?? 0} likes</span>
-            <span>{formatMoney(priceStats.totalValue)} estimado</span>
+            <span>{formatKnownMoney(priceStats.totalValue, priceStats.pricedCards > 0)} estimado</span>
             <span>{deck.isPublic ? "Público" : "Privado"}</span>
           </div>
         </div>
@@ -125,7 +125,7 @@ export default async function PublicDeckPage({ params }: PageProps) {
                     {item.card?.name ?? item.cardNumber}
                     <span className="ml-1 text-[10px] font-normal text-[#60706d]">{item.cardNumber}</span>
                   </span>
-                  <span className="text-xs font-semibold text-[#1d5fa8]">{formatMoney(cardPrices[normalizeCardNumber(item.cardNumber)]?.marketPrice)}</span>
+                  <span className="text-xs font-semibold text-[#1d5fa8]">{formatKnownMoney(cardPrices[normalizeCardNumber(item.cardNumber)]?.marketPrice, Boolean(cardPrices[normalizeCardNumber(item.cardNumber)]))}</span>
                 </div>
               ))}
             </div>
@@ -158,7 +158,7 @@ export default async function PublicDeckPage({ params }: PageProps) {
                     <span className="rounded bg-black/45 px-2 py-1 text-xs font-bold">{latestCover?.color[0] ?? "Deck"}</span>
                     <div className="absolute bottom-4 left-4 right-4">
                       <h3 className="truncate text-lg font-bold">{latestDeck.name}</h3>
-                      <p className="text-xs text-white/80">{latestDeck.viewCount ?? 0} views · {formatMoney(latestPriceStats.totalValue)}</p>
+                      <p className="text-xs text-white/80">{latestDeck.viewCount ?? 0} views · {formatKnownMoney(latestPriceStats.totalValue, latestPriceStats.pricedCards > 0)}</p>
                     </div>
                   </Link>
                 );
@@ -239,6 +239,10 @@ function getDeckCardNumbers(decks: Deck[]) {
   return Array.from(cardNumbers);
 }
 
+function getCardNamesByNumber(cards: DigimonCard[]) {
+  return Object.fromEntries(cards.map((card) => [normalizeCardNumber(card.cardNumber), card.name]));
+}
+
 function getDeckPriceStats(deck: Deck, cardPrices: CardPriceMap) {
   return deck.cards.reduce(
     (stats, deckCard) => {
@@ -255,6 +259,11 @@ function getDeckPriceStats(deck: Deck, cardPrices: CardPriceMap) {
 function formatMoney(value: number | null | undefined, currency = "USD") {
   if (value === null || value === undefined || !Number.isFinite(value)) return "-";
   return new Intl.NumberFormat("en-US", { style: "currency", currency }).format(value);
+}
+
+function formatKnownMoney(value: number | null | undefined, hasPrice: boolean, currency = "USD") {
+  if (!hasPrice) return "Pendiente";
+  return formatMoney(value, currency);
 }
 
 function normalizeCardNumber(cardNumber: string) {

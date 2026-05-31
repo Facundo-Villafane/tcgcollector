@@ -19,16 +19,16 @@ const maxExternalFetchesPerRequest = 12;
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const supabasePublishableKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
-const tcgApiKey = process.env.TCGAPI_KEY;
-const tcgApiGameSlug = process.env.TCGAPI_GAME_SLUG ?? "digimon-card-game";
+const tcgApiDevKey = process.env.TCGAPI_DEV_KEY ?? process.env.TCGAPI_DOT_DEV_KEY ?? process.env.TCGAPI_KEY;
+const tcgApiGameSlug = process.env.TCGAPI_GAME_SLUG ?? "digimon";
 
-export async function getCardPrices(cardNumbers: string[]) {
+export async function getCardPrices(cardNumbers: string[], cardNamesByNumber: Record<string, string> = {}) {
   const uniqueCardNumbers = uniqueNormalized(cardNumbers).slice(0, 120);
   const cachedPrices = await readCachedPrices(uniqueCardNumbers);
   const staleOrMissing = uniqueCardNumbers.filter((cardNumber) => isStale(cachedPrices[cardNumber]));
 
-  if (tcgApiKey && staleOrMissing.length > 0) {
-    const freshPrices = await fetchExternalPrices(staleOrMissing.slice(0, maxExternalFetchesPerRequest));
+  if (tcgApiDevKey && staleOrMissing.length > 0) {
+    const freshPrices = await fetchExternalPrices(staleOrMissing.slice(0, maxExternalFetchesPerRequest), cardNamesByNumber);
     await writeCachedPrices(freshPrices);
 
     for (const price of freshPrices) {
@@ -39,7 +39,7 @@ export async function getCardPrices(cardNumbers: string[]) {
   return {
     prices: cachedPrices,
     missing: uniqueCardNumbers.filter((cardNumber) => !cachedPrices[cardNumber]),
-    sourceReady: Boolean(tcgApiKey),
+    sourceReady: Boolean(tcgApiDevKey),
   };
 }
 
@@ -79,33 +79,36 @@ async function writeCachedPrices(prices: CardPrice[]) {
   );
 }
 
-async function fetchExternalPrices(cardNumbers: string[]) {
+async function fetchExternalPrices(cardNumbers: string[], cardNamesByNumber: Record<string, string>) {
   const prices: CardPrice[] = [];
 
   for (const cardNumber of cardNumbers) {
-    const price = await fetchTcgApiPrice(cardNumber);
+    const price = await fetchTcgApiDevPrice(cardNumber, cardNamesByNumber[normalizeCardNumber(cardNumber)]);
     if (price) prices.push(price);
   }
 
   return prices;
 }
 
-async function fetchTcgApiPrice(cardNumber: string): Promise<CardPrice | null> {
-  if (!tcgApiKey) return null;
+async function fetchTcgApiDevPrice(cardNumber: string, cardName?: string): Promise<CardPrice | null> {
+  if (!tcgApiDevKey) return null;
+
+  const query = cardName ?? cardNumber;
 
   const url = new URL("https://api.tcgapi.dev/v1/search");
-  url.searchParams.set("q", cardNumber);
+  url.searchParams.set("q", query);
   url.searchParams.set("game", tcgApiGameSlug);
   url.searchParams.set("type", "Cards");
+  url.searchParams.set("per_page", "200");
 
   const response = await fetch(url, {
-    headers: { "X-API-Key": tcgApiKey, Authorization: `Bearer ${tcgApiKey}` },
+    headers: { "X-API-Key": tcgApiDevKey, Authorization: `Bearer ${tcgApiDevKey}` },
     next: { revalidate: 60 * 60 },
   });
   if (!response.ok) return null;
 
   const payload = (await response.json()) as { data?: TcgApiSearchItem[] };
-  const item = findBestTcgApiItem(payload.data ?? [], cardNumber);
+  const item = findBestTcgApiDevItem(payload.data ?? [], cardNumber);
   if (!item) return null;
 
   const marketPrice = readNumber(item, ["price", "market_price", "marketPrice", "tcgplayer_market_price", "tcgplayerMarketPrice"]);
@@ -114,7 +117,7 @@ async function fetchTcgApiPrice(cardNumber: string): Promise<CardPrice | null> {
 
   return {
     cardNumber,
-    source: "tcgapi",
+    source: "tcgapi.dev",
     marketPrice: marketPrice ?? lowPrice,
     lowPrice,
     currency: readString(item, ["currency"]) ?? "USD",
@@ -123,11 +126,12 @@ async function fetchTcgApiPrice(cardNumber: string): Promise<CardPrice | null> {
   };
 }
 
-function findBestTcgApiItem(items: TcgApiSearchItem[], cardNumber: string) {
+function findBestTcgApiDevItem(items: TcgApiSearchItem[], cardNumber: string) {
   const normalized = normalizeCardNumber(cardNumber);
   return (
-    items.find((item) => Object.values(item).some((value) => typeof value === "string" && normalizeCardNumber(value).includes(normalized))) ??
-    items[0]
+    items.find((item) => normalizeCardNumber(readString(item, ["number"]) ?? "") === normalized) ??
+    items.find((item) => normalizeCardNumber(readString(item, ["number"]) ?? "").startsWith(normalized)) ??
+    null
   );
 }
 
@@ -175,5 +179,5 @@ function uniqueNormalized(values: string[]) {
 }
 
 function normalizeCardNumber(cardNumber: string) {
-  return cardNumber.trim().toUpperCase().replace(/_P\d+$/, "");
+  return cardNumber.trim().toUpperCase().replace(/_P\d+$/, "").replace(/-P\d+$/, "");
 }

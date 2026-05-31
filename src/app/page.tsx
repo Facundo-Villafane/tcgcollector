@@ -645,8 +645,8 @@ export default function Home() {
             {user && <div className="grid gap-3 sm:grid-cols-4">
               <Metric label="Cartas registradas" value={collectionCards.length.toString()} detail={`${ownedCopies} copias`} />
               <Metric label="Mis decks" value={decks.length.toString()} detail="listas creadas" />
-              <Metric label="Copias faltantes" value={totalMissingCopies.toString()} detail={`${formatMoney(totalMissingValue)} estimado`} />
-              <Metric label="Valor estimado" value={formatMoney(collectionValue)} detail={priceStatus} />
+              <Metric label="Copias faltantes" value={totalMissingCopies.toString()} detail={`${formatKnownMoney(totalMissingValue, deckPriceStats.some((stat) => stat.pricedCards > 0))} estimado`} />
+              <Metric label="Valor estimado" value={formatKnownMoney(collectionValue, collectionValue > 0)} detail={priceStatus} />
             </div>}
 
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -797,7 +797,7 @@ export default function Home() {
                           {stats.totalCards} cartas · {stats.missingCopies === 0 ? "Completo" : `${stats.missingCopies} copias faltantes`}
                         </span>
                         <span className="mt-1 block text-xs font-semibold text-[#127d84]">
-                          Deck {formatMoney(priceStats.totalValue)} · Faltan {formatMoney(priceStats.missingValue)}
+                          Deck {formatKnownMoney(priceStats.totalValue, priceStats.pricedCards > 0)} · Faltan {formatKnownMoney(priceStats.missingValue, priceStats.pricedCards > 0)}
                         </span>
                       </span>
                     </button>
@@ -1098,7 +1098,7 @@ function LatestDecks({ decks, cardsByNumber, cardPrices }: { decks: Deck[]; card
               <span className="rounded bg-black/55 px-2 py-1 text-xs font-bold shadow-sm">{cover?.color[0] ?? "Deck"}</span>
               <div className="absolute bottom-4 left-4 right-4">
                 <h3 className="truncate text-lg font-bold">{deck.name}</h3>
-                <p className="text-xs text-white/80">{deck.viewCount ?? 0} views Â· {formatMoney(priceStats.totalValue)}</p>
+                <p className="text-xs text-white/80">{deck.viewCount ?? 0} views Â· {formatKnownMoney(priceStats.totalValue, priceStats.pricedCards > 0)}</p>
               </div>
             </a>
           );
@@ -1707,8 +1707,8 @@ function DeckEditorHeader({
         <Metric label="Cartas distintas" value={deck.cards.length.toString()} detail="en la lista" />
         <Metric label="Faltan distintas" value={stats.missingDistinct.toString()} detail="cartas no completas" />
         <Metric label="Faltan copias" value={stats.missingCopies.toString()} detail="total requerido" />
-        <Metric label="Precio deck" value={formatMoney(priceStats.totalValue)} detail="estimado" />
-        <Metric label="Precio faltantes" value={formatMoney(priceStats.missingValue)} detail="para completar" />
+        <Metric label="Precio deck" value={formatKnownMoney(priceStats.totalValue, priceStats.pricedCards > 0)} detail="estimado" />
+        <Metric label="Precio faltantes" value={formatKnownMoney(priceStats.missingValue, priceStats.pricedCards > 0)} detail="para completar" />
         <Metric label="Precios cargados" value={priceStats.pricedCards.toString()} detail="cartas distintas" />
       </div>
       </div>
@@ -1849,6 +1849,8 @@ function DeckCardRow({
   onSetCover: () => void;
 }) {
   const missing = Math.max(required - owned, 0);
+  const requiredValue = price === null ? null : price * required;
+  const missingValue = price === null ? null : price * missing;
 
   return (
     <article
@@ -1865,11 +1867,11 @@ function DeckCardRow({
         <p className="text-sm text-[#60706d]">
           {card.cardNumber} · Necesito {required} · Tengo {owned}
         </p>
-        {price !== null && (
-          <p className="mt-1 text-xs font-semibold text-[#1d5fa8]">
-            {formatMoney(price)} c/u · {formatMoney(price * required)} deck
-          </p>
-        )}
+        <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs font-semibold text-[#1d5fa8]">
+          <span>{price === null ? "Precio pendiente" : `${formatMoney(price)} c/u`}</span>
+          <span>Total: {formatKnownMoney(requiredValue, price !== null)}</span>
+          <span>Faltantes: {formatKnownMoney(missingValue, price !== null && missing > 0)}</span>
+        </div>
         <p className={`mt-1 flex items-center gap-1 text-sm font-semibold ${missing === 0 ? "text-[#187a45]" : "text-[#b14d19]"}`}>
           {missing === 0 ? <CheckCircle2 size={15} /> : <ChevronLeft size={15} />}
           {missing === 0 ? "Completa" : `Falta ${missing}`}
@@ -1953,6 +1955,7 @@ function CompactDeckRow({
   onSetCover: () => void;
 }) {
   const missing = Math.max(item.quantityRequired - owned, 0);
+  const missingValue = price === null ? null : price * missing;
 
   return (
     <div className="grid grid-cols-[24px_minmax(0,1fr)_auto_auto_auto] items-center gap-2 rounded px-1 py-1 text-sm hover:bg-[#dfe7ea]">
@@ -1962,7 +1965,9 @@ function CompactDeckRow({
         <span className="ml-1 text-[10px] font-normal text-[#60706d]">{item.card.cardNumber}</span>
       </button>
       <span className={`h-2.5 w-2.5 rounded-full ${missing === 0 ? "bg-[#187a45]" : "bg-[#d9534f]"}`} title={missing === 0 ? "Completa" : `Falta ${missing}`} />
-      {price !== null && <span className="text-xs font-semibold text-[#1d5fa8]">{formatMoney(price)}</span>}
+      <span className="text-xs font-semibold text-[#1d5fa8]" title={missing > 0 ? `Faltantes: ${formatKnownMoney(missingValue, price !== null)}` : "Sin faltantes"}>
+        {price === null ? "-" : formatMoney(price)}
+      </span>
       {isEditing ? (
         <button
           className={`grid h-7 w-7 place-items-center rounded ${isCover ? "bg-[#f4c430] text-[#1b2424]" : "text-[#60706d] hover:bg-white"}`}
@@ -2168,6 +2173,11 @@ function getPricedCardNumbers(decks: Deck[], publicDecks: Deck[], collectionCard
 function formatMoney(value: number | null | undefined, currency = "USD") {
   if (value === null || value === undefined || !Number.isFinite(value)) return "-";
   return new Intl.NumberFormat("en-US", { style: "currency", currency }).format(value);
+}
+
+function formatKnownMoney(value: number | null | undefined, hasPrice: boolean, currency = "USD") {
+  if (!hasPrice) return "Pendiente";
+  return formatMoney(value, currency);
 }
 
 function getDeckStats(deck: Deck, ownedByCardNumber: CollectionMap, cardsByNumber?: Map<string, DigimonCard>) {

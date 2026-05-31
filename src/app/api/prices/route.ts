@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCardPrices } from "@/lib/api/price-client";
+import { getDigimonCards } from "@/lib/api/digimon-card-client";
 
 export async function GET(request: NextRequest) {
   const cardNumbers = request.nextUrl.searchParams
@@ -13,10 +14,19 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const payload = await getCardPrices(cardNumbers);
+    const cards = await getDigimonCards();
+    const payload = await getCardPrices(cardNumbers, getCardNamesByNumber(cards));
     return NextResponse.json(payload);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unexpected price API error";
     return NextResponse.json({ error: message, prices: {}, missing: cardNumbers }, { status: 502 });
   }
+}
+
+function getCardNamesByNumber(cards: Awaited<ReturnType<typeof getDigimonCards>>) {
+  return Object.fromEntries(cards.map((card) => [normalizeCardNumber(card.cardNumber), card.name]));
+}
+
+function normalizeCardNumber(cardNumber: string) {
+  return cardNumber.trim().toUpperCase().replace(/_P\d+$/, "").replace(/-P\d+$/, "");
 }
